@@ -1,15 +1,231 @@
 import os
 import json
+import base64
+import binascii
+import time
+from pathlib import Path
+from typing import Any
 from uuid import uuid4
 import numpy as np
 from datetime import datetime
-from fastapi import APIRouter, WebSocket, UploadFile, File, Response
-from starlette.responses import JSONResponse
+from fastapi import APIRouter, WebSocket, UploadFile, File, Response, HTTPException, Request
+from pydantic import BaseModel, Field
+from ruamel.yaml import YAML
+from starlette.responses import FileResponse, JSONResponse
 from starlette.websockets import WebSocketDisconnect
 from loguru import logger
+from .config_manager import validate_config
 from .service_context import ServiceContext
 from .websocket_handler import WebSocketHandler
 from .proxy_handler import ProxyHandler
+from .ue_avatar_server import ue_avatar_server
+
+
+CONFIG_PATH = Path("conf.yaml")
+
+TTS_EDITABLE_FIELDS: dict[str, set[str]] = {
+    "edge_tts": {"voice", "proxy"},
+    "cosyvoice_tts": {
+        "client_url",
+        "mode_checkbox_group",
+        "sft_dropdown",
+        "prompt_text",
+        "prompt_wav_upload_url",
+        "prompt_wav_record_url",
+        "instruct_text",
+        "seed",
+        "api_name",
+    },
+    "cosyvoice2_tts": {
+        "client_url",
+        "mode_checkbox_group",
+        "sft_dropdown",
+        "prompt_text",
+        "prompt_wav_upload_url",
+        "prompt_wav_record_url",
+        "instruct_text",
+        "stream",
+        "seed",
+        "speed",
+        "api_name",
+    },
+    "x_tts": {"api_url", "speaker_wav", "language"},
+    "gpt_sovits_tts": {
+        "api_url",
+        "text_lang",
+        "ref_audio_path",
+        "prompt_lang",
+        "prompt_text",
+        "text_split_method",
+        "batch_size",
+        "media_type",
+        "streaming_mode",
+    },
+    "piper_tts": {
+        "model_path",
+        "speaker_id",
+        "length_scale",
+        "noise_scale",
+        "noise_w",
+        "volume",
+        "normalize_audio",
+        "use_cuda",
+    },
+    "sherpa_onnx_tts": {
+        "vits_model",
+        "vits_lexicon",
+        "vits_tokens",
+        "vits_data_dir",
+        "vits_dict_dir",
+        "tts_rule_fsts",
+        "max_num_sentences",
+        "sid",
+        "provider",
+        "num_threads",
+        "speed",
+        "debug",
+    },
+    "siliconflow_tts": {
+        "api_url",
+        "default_model",
+        "default_voice",
+        "sample_rate",
+        "response_format",
+        "stream",
+        "speed",
+        "gain",
+    },
+    "openai_tts": {"model", "voice", "base_url", "file_extension"},
+    "spark_tts": {"api_url", "prompt_wav_upload", "api_name", "gender", "pitch", "speed"},
+    "minimax_tts": {"model", "voice_id", "pronunciation_dict"},
+    "elevenlabs_tts": {
+        "voice_id",
+        "model_id",
+        "output_format",
+        "stability",
+        "similarity_boost",
+        "style",
+        "use_speaker_boost",
+    },
+    "cartesia_tts": {
+        "voice_id",
+        "model_id",
+        "output_format",
+        "language",
+        "emotion",
+        "volume",
+        "speed",
+    },
+}
+
+
+class RuntimeTTSConfigUpdate(BaseModel):
+    tts_model: str
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class UeAudioCacheRequest(BaseModel):
+    audio: str
+
+
+class UeAvatarMessageRequest(BaseModel):
+    message: dict[str, Any]
+
+
+def _read_conf_yaml() -> Any:
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    with CONFIG_PATH.open("r", encoding="utf-8") as file:
+        return yaml.load(file)
+
+
+def _write_conf_yaml(config_data: Any) -> None:
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    yaml.indent(mapping=2, sequence=4, offset=2)
+    with CONFIG_PATH.open("w", encoding="utf-8") as file:
+        yaml.dump(config_data, file)
+
+
+def _get_tts_config_data(config_data: Any) -> Any:
+    try:
+        return config_data["character_config"]["tts_config"]
+    except (KeyError, TypeError) as exc:
+        raise HTTPException(status_code=500, detail="Invalid TTS configuration file") from exc
+
+
+def _serialize_tts_config(tts_config: Any) -> dict[str, Any]:
+    providers = sorted(
+        provider
+        for provider in TTS_EDITABLE_FIELDS
+        if isinstance(tts_config.get(provider), dict)
+    )
+    selected_model = tts_config.get("tts_model")
+    provider_config = tts_config.get(selected_model, {})
+    editable_fields = TTS_EDITABLE_FIELDS.get(selected_model, set())
+    safe_config = {
+        key: value
+        for key, value in dict(provider_config).items()
+        if key in editable_fields
+    }
+
+    return {
+        "tts_model": selected_model,
+        "providers": providers,
+        "config": safe_config,
+        "provider_configs": {
+            provider: {
+                key: value
+                for key, value in dict(tts_config.get(provider, {})).items()
+                if key in TTS_EDITABLE_FIELDS[provider]
+            }
+            for provider in providers
+        },
+    }
+
+
+def _build_next_tts_config(update: RuntimeTTSConfigUpdate) -> Any:
+    config_data = _read_conf_yaml()
+    tts_config = _get_tts_config_data(config_data)
+    if update.tts_model not in TTS_EDITABLE_FIELDS:
+        raise HTTPException(status_code=400, detail=f"Unsupported TTS model: {update.tts_model}")
+    if update.tts_model not in tts_config:
+        raise HTTPException(status_code=400, detail=f"TTS model is not configured: {update.tts_model}")
+
+    tts_config["tts_model"] = update.tts_model
+    editable_fields = TTS_EDITABLE_FIELDS[update.tts_model]
+    provider_config = tts_config[update.tts_model]
+    for key, value in update.config.items():
+        if key in editable_fields:
+            provider_config[key] = value
+
+    validated_config = validate_config(config_data)
+    return config_data, validated_config
+
+
+UE_AUDIO_CACHE_DIR = Path("cache") / "ue_audio"
+UE_AUDIO_CACHE_MAX_AGE_SECONDS = 60 * 60
+
+
+def _purge_old_ue_audio_files() -> None:
+    if not UE_AUDIO_CACHE_DIR.exists():
+        return
+
+    expires_before = time.time() - UE_AUDIO_CACHE_MAX_AGE_SECONDS
+    for audio_file in UE_AUDIO_CACHE_DIR.glob("*.wav"):
+        try:
+            if audio_file.stat().st_mtime < expires_before:
+                audio_file.unlink()
+        except OSError:
+            logger.debug(f"Failed to purge UE audio cache file: {audio_file}")
+
+
+def _decode_audio_base64(audio: str) -> bytes:
+    normalized = audio.split(",", 1)[1] if "," in audio else audio
+    try:
+        return base64.b64decode(normalized, validate=True)
+    except binascii.Error as exc:
+        raise HTTPException(status_code=400, detail="Invalid base64 audio payload") from exc
 
 
 def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
@@ -108,17 +324,26 @@ def init_webtool_routes(default_context_cache: ServiceContext) -> APIRouter:
         for entry in os.scandir(live2d_dir):
             if entry.is_dir():
                 folder_name = entry.name.replace("\\", "/")
-                model3_file = os.path.join(
-                    live2d_dir, folder_name, f"{folder_name}.model3.json"
-                ).replace("\\", "/")
+                model3_candidates = [
+                    os.path.join(live2d_dir, folder_name, f"{folder_name}.model3.json"),
+                    os.path.join(live2d_dir, folder_name, "runtime", f"{folder_name}.model3.json"),
+                ]
+                model3_file = next(
+                    (candidate for candidate in model3_candidates if os.path.isfile(candidate)),
+                    "",
+                )
 
-                if os.path.isfile(model3_file):
+                if model3_file:
                     # Find avatar file if it exists
                     avatar_file = None
-                    for ext in supported_extensions:
-                        avatar_path = os.path.join(
-                            live2d_dir, folder_name, f"{folder_name}{ext}"
-                        )
+                    avatar_candidates = []
+                    for root in ("", "runtime"):
+                        for ext in supported_extensions:
+                            avatar_candidates.append(
+                                os.path.join(live2d_dir, folder_name, root, f"{folder_name}{ext}")
+                            )
+
+                    for avatar_path in avatar_candidates:
                         if os.path.isfile(avatar_path):
                             avatar_file = avatar_path.replace("\\", "/")
                             break
@@ -135,6 +360,88 @@ def init_webtool_routes(default_context_cache: ServiceContext) -> APIRouter:
                 "type": "live2d-models/info",
                 "count": len(valid_characters),
                 "characters": valid_characters,
+            }
+        )
+
+    @router.get("/api/runtime/tts-config")
+    async def get_runtime_tts_config():
+        """Get the editable runtime TTS configuration for the main frontend."""
+        config_data = _read_conf_yaml()
+        return JSONResponse(_serialize_tts_config(_get_tts_config_data(config_data)))
+
+    @router.put("/api/runtime/tts-config")
+    async def update_runtime_tts_config(update: RuntimeTTSConfigUpdate):
+        """Update the selected TTS provider and safe provider fields."""
+        try:
+            config_data, validated_config = _build_next_tts_config(update)
+            default_context_cache.init_tts(validated_config.character_config.tts_config)
+            default_context_cache.config = validated_config
+            default_context_cache.system_config = validated_config.system_config
+            default_context_cache.character_config = validated_config.character_config
+            _write_conf_yaml(config_data)
+            logger.info(f"Runtime TTS configuration updated: {update.tts_model}")
+            return JSONResponse(_serialize_tts_config(_get_tts_config_data(config_data)))
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to update runtime TTS configuration: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to update TTS configuration: {e}",
+            ) from e
+
+    @router.post("/api/runtime/ue-audio-cache")
+    async def cache_ue_audio(payload: UeAudioCacheRequest, request: Request):
+        """Cache browser-received WAV audio so UE can fetch it via HttpValue."""
+        audio_bytes = _decode_audio_base64(payload.audio)
+        if not audio_bytes:
+            raise HTTPException(status_code=400, detail="Audio payload is empty")
+
+        _purge_old_ue_audio_files()
+        UE_AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        file_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}.wav"
+        audio_path = UE_AUDIO_CACHE_DIR / file_name
+        audio_path.write_bytes(audio_bytes)
+
+        audio_url = str(request.url_for("get_ue_audio_cache", file_name=file_name))
+        return JSONResponse(
+            {
+                "url": audio_url,
+                "path": str(audio_path),
+            }
+        )
+
+    @router.get("/api/runtime/ue-audio-cache/{file_name}", name="get_ue_audio_cache")
+    async def get_ue_audio_cache(file_name: str):
+        """Serve cached UE audio files generated from frontend audio payloads."""
+        if "/" in file_name or "\\" in file_name or not file_name.endswith(".wav"):
+            raise HTTPException(status_code=400, detail="Invalid audio file name")
+
+        audio_path = UE_AUDIO_CACHE_DIR / file_name
+        if not audio_path.is_file():
+            raise HTTPException(status_code=404, detail="Audio file not found")
+
+        return FileResponse(audio_path, media_type="audio/wav", filename=file_name)
+
+    @router.post("/api/runtime/ue-avatar-message")
+    async def send_ue_avatar_message(payload: UeAvatarMessageRequest):
+        """Send a Fay-compatible digital human message to connected UE clients."""
+        sent = await ue_avatar_server.send(payload.message)
+        username = payload.message.get("Username")
+        return JSONResponse(
+            {
+                "sent": sent,
+                "connected_clients": ue_avatar_server.client_count(username),
+            }
+        )
+
+    @router.get("/api/runtime/ue-avatar-status")
+    async def get_ue_avatar_status():
+        """Return currently connected Fay-compatible UE digital human clients."""
+        return JSONResponse(
+            {
+                "connected_clients": ue_avatar_server.client_count(),
+                "clients": ue_avatar_server.client_snapshot(),
             }
         )
 
