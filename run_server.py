@@ -1,7 +1,6 @@
 import os
 import sys
 import atexit
-import asyncio
 import argparse
 import subprocess
 from pathlib import Path
@@ -111,13 +110,15 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Open-LLM-VTuber Server")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     parser.add_argument(
+        "--reload", action="store_true", help="Enable backend hot reload"
+    )
+    parser.add_argument(
         "--hf_mirror", action="store_true", help="Use Hugging Face mirror"
     )
     return parser.parse_args()
 
 
-@logger.catch
-def run(console_log_level: str):
+def create_app(console_log_level: str = "INFO"):
     init_logger(console_log_level)
     logger.info(f"Open-LLM-VTuber, version v{get_version()}")
 
@@ -145,23 +146,50 @@ def run(console_log_level: str):
     # Initialize the WebSocket server (synchronous part)
     server = WebSocketServer(config=config)
 
-    # Perform asynchronous initialization (loading context, etc.)
-    logger.info("Initializing server context...")
-    try:
-        asyncio.run(server.initialize())
-        logger.info("Server context initialized successfully.")
-    except Exception as e:
-        logger.error(f"Failed to initialize server context: {e}")
-        sys.exit(1)  # Exit if initialization fails
+    @server.app.on_event("startup")
+    async def initialize_server_context():
+        logger.info("Initializing server context...")
+        try:
+            await server.initialize()
+            logger.info("Server context initialized successfully.")
+        except Exception as e:
+            logger.error(f"Failed to initialize server context: {e}")
+            raise
+
+    @server.app.on_event("shutdown")
+    async def shutdown_ue_avatar_server():
+        server.ue_avatar_server.stop()
+
+    return server.app
+
+
+@logger.catch
+def run(console_log_level: str, reload: bool = False):
+    config: Config = validate_config(read_yaml("conf.yaml"))
+    server_config = config.system_config
+    host = "127.0.0.1" if server_config.host == "localhost" else server_config.host
 
     # Run the Uvicorn server
-    logger.info(f"Starting server on {server_config.host}:{server_config.port}")
-    uvicorn.run(
-        app=server.app,
-        host=server_config.host,
-        port=server_config.port,
-        log_level=console_log_level.lower(),
-    )
+    logger.info(f"Starting server on {host}:{server_config.port}")
+    if reload:
+        uvicorn.run(
+            "run_server:create_app",
+            factory=True,
+            host=host,
+            port=server_config.port,
+            log_level=console_log_level.lower(),
+            reload=True,
+            reload_dirs=["src", "prompts", "run_server.py"],
+            reload_includes=["*.py", "*.txt", "conf.yaml"],
+        )
+    else:
+        app = create_app(console_log_level)
+        uvicorn.run(
+            app=app,
+            host=host,
+            port=server_config.port,
+            log_level=console_log_level.lower(),
+        )
 
 
 if __name__ == "__main__":
@@ -175,4 +203,4 @@ if __name__ == "__main__":
         )
     if args.hf_mirror:
         os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-    run(console_log_level=console_log_level)
+    run(console_log_level=console_log_level, reload=args.reload)

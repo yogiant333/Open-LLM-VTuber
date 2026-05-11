@@ -17,6 +17,7 @@ from starlette.staticfiles import StaticFiles as StarletteStaticFiles
 from .routes import init_client_ws_route, init_webtool_routes, init_proxy_route
 from .service_context import ServiceContext
 from .config_manager.utils import Config
+from .ue_avatar_server import ue_avatar_server
 
 
 # Create a custom StaticFiles class that adds CORS headers
@@ -74,6 +75,7 @@ class WebSocketServer:
     def __init__(self, config: Config, default_context_cache: ServiceContext = None):
         self.app = FastAPI(title="Open-LLM-VTuber Server")  # Added title for clarity
         self.config = config
+        self.ue_avatar_server = ue_avatar_server
         self.default_context_cache = (
             default_context_cache or ServiceContext()
         )  # Use provided context or initialize a new empty one waiting to be loaded
@@ -152,6 +154,7 @@ class WebSocketServer:
         """Asynchronously load the service context from config.
         Calling this function is needed if default_context_cache was not provided to the constructor."""
         await self.default_context_cache.load_from_config(self.config)
+        self.ue_avatar_server.start()
 
     @staticmethod
     def clean_cache():

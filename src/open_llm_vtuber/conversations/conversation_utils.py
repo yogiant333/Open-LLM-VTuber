@@ -14,6 +14,7 @@ from ..asr.asr_interface import ASRInterface
 from ..live2d_model import Live2dModel
 from ..tts.tts_interface import TTSInterface
 from ..utils.stream_audio import prepare_audio_payload
+from ..ue_avatar_protocol import send_audio_end, send_log, send_question
 
 
 # Convert class methods to standalone functions
@@ -132,6 +133,7 @@ async def handle_audio_output(
 
 async def send_conversation_start_signals(websocket_send: WebSocketSend) -> None:
     """Send initial conversation signals"""
+    await send_log("思考中...")
     await websocket_send(
         json.dumps(
             {
@@ -152,10 +154,12 @@ async def process_user_input(
     if isinstance(user_input, np.ndarray):
         logger.info("Transcribing audio input...")
         input_text = await asr_engine.async_transcribe_np(user_input)
+        await send_question(input_text)
         await websocket_send(
             json.dumps({"type": "user-input-transcription", "text": input_text})
         )
         return input_text
+    await send_question(user_input)
     return user_input
 
 
@@ -168,6 +172,8 @@ async def finalize_conversation_turn(
     """Finalize a conversation turn"""
     if tts_manager.task_list:
         await asyncio.gather(*tts_manager.task_list)
+        await send_audio_end()
+        await send_log("")
         await websocket_send(json.dumps({"type": "backend-synth-complete"}))
 
         response = await message_handler.wait_for_response(

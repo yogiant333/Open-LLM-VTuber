@@ -10,6 +10,7 @@ from ..agent.output_types import DisplayText, Actions
 from ..live2d_model import Live2dModel
 from ..tts.tts_interface import TTSInterface
 from ..utils.stream_audio import prepare_audio_payload
+from ..ue_avatar_protocol import send_audio_payload
 from .types import WebSocketSend
 
 
@@ -105,6 +106,7 @@ class TTSTaskManager:
                 # Send payloads in order
                 while self._next_sequence_to_send in buffered_payloads:
                     next_payload = buffered_payloads.pop(self._next_sequence_to_send)
+                    await send_audio_payload(next_payload)
                     await websocket_send(json.dumps(next_payload))
                     self._next_sequence_to_send += 1
 
