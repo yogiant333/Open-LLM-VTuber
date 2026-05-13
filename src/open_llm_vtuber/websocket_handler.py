@@ -14,6 +14,7 @@ from .chat_group import (
     broadcast_to_group,
 )
 from .message_handler import message_handler
+from .ue_avatar_server import ue_avatar_server
 from .utils.stream_audio import prepare_audio_payload
 from .chat_history_manager import (
     create_new_history,
@@ -69,6 +70,8 @@ class WebSocketHandler:
         self.current_conversation_tasks: Dict[str, Optional[asyncio.Task]] = {}
         self.default_context_cache = default_context_cache
         self.received_data_buffers: Dict[str, np.ndarray] = {}
+        self._event_loop: asyncio.AbstractEventLoop | None = None
+        ue_avatar_server.set_status_listener(self._publish_ue_avatar_status)
 
         # Message handlers mapping
         self._message_handlers = self._init_message_handlers()
@@ -111,6 +114,7 @@ class WebSocketHandler:
             Exception: If initialization fails
         """
         try:
+            self._event_loop = asyncio.get_running_loop()
             session_service_context = await self._init_service_context(
                 websocket.send_text, client_uid
             )
@@ -172,8 +176,27 @@ class WebSocketHandler:
         # Send initial group status
         await self.send_group_update(websocket, client_uid)
 
+        await websocket.send_text(json.dumps(ue_avatar_server.status_payload()))
+
         # Start microphone
         await websocket.send_text(json.dumps({"type": "control", "text": "start-mic"}))
+
+    def _publish_ue_avatar_status(self, payload: dict) -> None:
+        loop = self._event_loop
+        if not loop or loop.is_closed():
+            return
+
+        asyncio.run_coroutine_threadsafe(
+            self.broadcast_ue_avatar_status(payload),
+            loop,
+        )
+
+    async def broadcast_ue_avatar_status(self, payload: dict) -> None:
+        for uid, websocket in list(self.client_connections.items()):
+            try:
+                await websocket.send_text(json.dumps(payload))
+            except Exception as exc:
+                logger.warning(f"Failed to send UE avatar status to {uid}: {exc}")
 
     async def _init_service_context(
         self, send_text: Callable, client_uid: str

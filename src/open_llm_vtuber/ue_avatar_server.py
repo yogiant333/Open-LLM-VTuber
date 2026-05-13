@@ -20,6 +20,10 @@ class UeAvatarServer:
         self._thread: threading.Thread | None = None
         self._started = threading.Event()
         self._lock = threading.Lock()
+        self._status_listener = None
+
+    def set_status_listener(self, listener) -> None:
+        self._status_listener = listener
 
     def start(self) -> None:
         with self._lock:
@@ -73,6 +77,13 @@ class UeAvatarServer:
             for websocket, metadata in self._clients.items()
         ]
 
+    def status_payload(self) -> dict[str, Any]:
+        return {
+            "type": "ue-avatar-status",
+            "connected_clients": self.client_count(),
+            "clients": self.client_snapshot(),
+        }
+
     async def send(self, message: dict[str, Any]) -> int:
         text = json.dumps(message, ensure_ascii=False)
         username = message.get("Username")
@@ -117,6 +128,7 @@ class UeAvatarServer:
             "path": path,
         }
         logger.info(f"UE avatar WebSocket connected: {websocket.remote_address}")
+        self._emit_status()
 
         try:
             async for message in websocket:
@@ -130,6 +142,7 @@ class UeAvatarServer:
         if websocket in self._clients:
             self._clients.pop(websocket, None)
             logger.info(f"UE avatar WebSocket disconnected: {websocket.remote_address}")
+            self._emit_status()
 
     def _update_client_metadata(
         self,
@@ -163,6 +176,16 @@ class UeAvatarServer:
                 f"remote={self._format_remote_address(websocket)} "
                 f"username={metadata.get('username')} output={metadata.get('output')}"
             )
+            self._emit_status()
+
+    def _emit_status(self) -> None:
+        if not self._status_listener:
+            return
+
+        try:
+            self._status_listener(self.status_payload())
+        except Exception as exc:
+            logger.warning(f"Failed to publish UE avatar status: {exc}")
 
     def _run_loop(self) -> None:
         loop = asyncio.new_event_loop()
