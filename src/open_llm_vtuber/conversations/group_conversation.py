@@ -51,7 +51,7 @@ async def process_group_conversation(
         metadata: Optional metadata for special processing flags
     """
     # Create TTSTaskManager for each member
-    tts_managers = {uid: TTSTaskManager() for uid in group_members}
+    tts_managers = {uid: TTSTaskManager(username=uid) for uid in group_members}
 
     try:
         logger.info(f"Group Conversation Chain {session_emoji} started!")
@@ -198,7 +198,10 @@ async def process_group_input(
 ) -> str:
     """Process and broadcast user input to group"""
     input_text = await process_user_input(
-        user_input, initiator_context.asr_engine, initiator_ws_send
+        user_input,
+        initiator_context.asr_engine,
+        initiator_ws_send,
+        username=initiator_client_uid,
     )
     await broadcast_transcription(
         broadcast_func, group_members, input_text, initiator_client_uid
@@ -263,6 +266,7 @@ async def handle_group_member_turn(
         batch_input=batch_input,
         current_ws_send=current_ws_send,
         tts_manager=tts_manager,
+        current_member_uid=current_member_uid,
         broadcast_func=broadcast_func,
         group_members=group_members,
     )
@@ -343,6 +347,7 @@ async def process_member_response(
     batch_input: Any,
     current_ws_send: WebSocketSend,
     tts_manager: TTSTaskManager,
+    current_member_uid: str,
     broadcast_func: Optional[BroadcastFunc] = None,
     group_members: Optional[List[str]] = None,
 ) -> str:
@@ -376,6 +381,7 @@ async def process_member_response(
                     websocket_send=current_ws_send,  # Send TTS/display text directly to speaker's client
                     tts_manager=tts_manager,
                     translate_engine=context.translate_engine,
+                    username=current_member_uid,
                 )
                 full_response += response_part  # Accumulate text response
             else:

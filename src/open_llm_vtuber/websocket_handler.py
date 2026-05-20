@@ -115,6 +115,7 @@ class WebSocketHandler:
         """
         try:
             self._event_loop = asyncio.get_running_loop()
+            await self._replace_existing_connection(client_uid)
             session_service_context = await self._init_service_context(
                 websocket.send_text, client_uid
             )
@@ -135,6 +136,20 @@ class WebSocketHandler:
             )
             await self._cleanup_failed_connection(client_uid)
             raise
+
+    async def _replace_existing_connection(self, client_uid: str) -> None:
+        """Close and remove a stale connection before reusing an explicit client UID."""
+        old_websocket = self.client_connections.get(client_uid)
+        if not old_websocket:
+            return
+
+        logger.info(f"Replacing existing connection for client {client_uid}")
+        try:
+            await old_websocket.close(code=1000, reason="client_uid reconnected")
+        except Exception as exc:
+            logger.debug(f"Failed closing stale websocket for {client_uid}: {exc}")
+
+        await self._cleanup_failed_connection(client_uid)
 
     async def _store_client_data(
         self,
@@ -300,8 +315,14 @@ class WebSocketHandler:
             send_group_update=self.send_group_update,
         )
 
-    async def handle_disconnect(self, client_uid: str) -> None:
+    async def handle_disconnect(
+        self, client_uid: str, websocket: Optional[WebSocket] = None
+    ) -> None:
         """Handle client disconnection"""
+        if websocket is not None and self.client_connections.get(client_uid) is not websocket:
+            logger.debug(f"Ignoring stale disconnect for client {client_uid}")
+            return
+
         group = self.chat_group_manager.get_client_group(client_uid)
         if group:
             await handle_group_interrupt(
@@ -320,6 +341,8 @@ class WebSocketHandler:
             send_group_update=self.send_group_update,
         )
 
+        context = self.client_contexts.get(client_uid)
+
         # Clean up other client data
         self.client_connections.pop(client_uid, None)
         self.client_contexts.pop(client_uid, None)
@@ -331,7 +354,6 @@ class WebSocketHandler:
             self.current_conversation_tasks.pop(client_uid, None)
 
         # Call context close to clean up resources (e.g., MCPClient)
-        context = self.client_contexts.get(client_uid)
         if context:
             await context.close()
 

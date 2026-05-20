@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import binascii
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from .ue_avatar_server import ue_avatar_server
 
 
 CONFIG_PATH = Path("conf.yaml")
+CLIENT_UID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 
 TTS_EDITABLE_FIELDS: dict[str, set[str]] = {
     "edge_tts": {"voice", "proxy"},
@@ -48,6 +50,16 @@ TTS_EDITABLE_FIELDS: dict[str, set[str]] = {
         "seed",
         "speed",
         "api_name",
+    },
+    "cosyvoice3_tts": {
+        "base_url",
+        "mode",
+        "spk_id",
+        "prompt_text",
+        "prompt_wav",
+        "instruct_text",
+        "sample_rate",
+        "timeout",
     },
     "x_tts": {"api_url", "speaker_wav", "language"},
     "gpt_sovits_tts": {
@@ -246,16 +258,23 @@ def init_client_ws_route(default_context_cache: ServiceContext) -> APIRouter:
     async def websocket_endpoint(websocket: WebSocket):
         """WebSocket endpoint for client connections"""
         await websocket.accept()
-        client_uid = str(uuid4())
+        requested_client_uid = websocket.query_params.get("client_uid", "")
+        client_uid = (
+            requested_client_uid
+            if CLIENT_UID_PATTERN.fullmatch(requested_client_uid)
+            else str(uuid4())
+        )
+        if requested_client_uid and requested_client_uid != client_uid:
+            logger.warning(f"Ignoring invalid client_uid query value: {requested_client_uid}")
 
         try:
             await ws_handler.handle_new_connection(websocket, client_uid)
             await ws_handler.handle_websocket_communication(websocket, client_uid)
         except WebSocketDisconnect:
-            await ws_handler.handle_disconnect(client_uid)
+            await ws_handler.handle_disconnect(client_uid, websocket)
         except Exception as e:
             logger.error(f"Error in WebSocket connection: {e}")
-            await ws_handler.handle_disconnect(client_uid)
+            await ws_handler.handle_disconnect(client_uid, websocket)
             raise
 
     return router

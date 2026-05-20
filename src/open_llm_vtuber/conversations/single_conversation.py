@@ -46,17 +46,17 @@ async def process_single_conversation(
         str: Complete response text
     """
     # Create TTSTaskManager for this conversation
-    tts_manager = TTSTaskManager()
+    tts_manager = TTSTaskManager(username=client_uid)
     full_response = ""  # Initialize full_response here
 
     try:
         # Send initial signals
-        await send_conversation_start_signals(websocket_send)
+        await send_conversation_start_signals(websocket_send, username=client_uid)
         logger.info(f"New Conversation Chain {session_emoji} started!")
 
         # Process user input
         input_text = await process_user_input(
-            user_input, context.asr_engine, websocket_send
+            user_input, context.asr_engine, websocket_send, username=client_uid
         )
 
         # Create batch input
@@ -110,6 +110,7 @@ async def process_single_conversation(
                         websocket_send=websocket_send,  # Pass websocket_send for audio/tts messages
                         tts_manager=tts_manager,
                         translate_engine=context.translate_engine,
+                        username=client_uid,
                     )
                     # Ensure response_part is treated as a string before concatenation
                     response_part_str = (
