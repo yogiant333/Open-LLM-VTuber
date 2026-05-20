@@ -1,6 +1,7 @@
 from typing import Union, List, Dict, Any, Optional
 import asyncio
 import json
+import time
 from loguru import logger
 import numpy as np
 
@@ -45,8 +46,17 @@ async def process_single_conversation(
     Returns:
         str: Complete response text
     """
+    turn_started_ns = time.perf_counter_ns()
+    timing_context: Dict[str, Any] = {
+        "turn_started_ns": turn_started_ns,
+        "turn_id": f"{client_uid}-{turn_started_ns}",
+        "first_agent_output_logged": False,
+        "first_audio_sent_logged": False,
+        "first_tts_task_queued_logged": False,
+        "first_tts_audio_generated_logged": False,
+    }
     # Create TTSTaskManager for this conversation
-    tts_manager = TTSTaskManager(username=client_uid)
+    tts_manager = TTSTaskManager(username=client_uid, timing_context=timing_context)
     full_response = ""  # Initialize full_response here
 
     try:
@@ -57,6 +67,13 @@ async def process_single_conversation(
         # Process user input
         input_text = await process_user_input(
             user_input, context.asr_engine, websocket_send, username=client_uid
+        )
+        input_ready_ms = (time.perf_counter_ns() - turn_started_ns) / 1_000_000
+        logger.info(
+            "PERF conversation turn_id={} event=input_ready input_type={} elapsed_ms={:.3f}",
+            timing_context["turn_id"],
+            "audio" if isinstance(user_input, np.ndarray) else "text",
+            input_ready_ms,
         )
 
         # Create batch input
@@ -101,6 +118,17 @@ async def process_single_conversation(
                     await websocket_send(json.dumps(output_item))
 
                 elif isinstance(output_item, (SentenceOutput, AudioOutput)):
+                    if not timing_context["first_agent_output_logged"]:
+                        timing_context["first_agent_output_logged"] = True
+                        first_agent_output_ms = (
+                            time.perf_counter_ns() - turn_started_ns
+                        ) / 1_000_000
+                        logger.info(
+                            "PERF conversation turn_id={} event=first_agent_output output_type={} elapsed_ms={:.3f}",
+                            timing_context["turn_id"],
+                            type(output_item).__name__,
+                            first_agent_output_ms,
+                        )
                     # Handle SentenceOutput or AudioOutput
                     response_part = await process_agent_output(
                         output=output_item,

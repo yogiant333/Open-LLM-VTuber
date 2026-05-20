@@ -30,6 +30,7 @@ class AsyncLLM(StatelessLLMInterface):
         organization_id: str = "z",
         project_id: str = "z",
         temperature: float = 1.0,
+        thinking: str | None = None,
     ):
         """
         Initializes an instance of the `AsyncLLM` class.
@@ -41,10 +42,12 @@ class AsyncLLM(StatelessLLMInterface):
         - project_id (str, optional): The project ID for the OpenAI API. Defaults to "z".
         - llm_api_key (str, optional): The API key for the OpenAI API. Defaults to "z".
         - temperature (float, optional): What sampling temperature to use, between 0 and 2. Defaults to 1.0.
+        - thinking (str | None, optional): Provider-specific thinking mode toggle.
         """
         self.base_url = base_url
         self.model = model
         self.temperature = temperature
+        self.thinking = thinking
         self.client = AsyncOpenAI(
             base_url=base_url,
             organization=organization_id,
@@ -96,6 +99,9 @@ class AsyncLLM(StatelessLLMInterface):
             logger.debug(f"Messages: {messages_with_system}")
 
             available_tools = tools if self.support_tools else NOT_GIVEN
+            extra_body = (
+                {"thinking": {"type": self.thinking}} if self.thinking else NOT_GIVEN
+            )
 
             stream: AsyncStream[
                 ChatCompletionChunk
@@ -105,6 +111,7 @@ class AsyncLLM(StatelessLLMInterface):
                 stream=True,
                 temperature=self.temperature,
                 tools=available_tools,
+                extra_body=extra_body,
             )
             logger.debug(
                 f"Tool Support: {self.support_tools}, Available tools: {available_tools}"

@@ -1,3 +1,4 @@
+import re
 from typing import AsyncIterator, Tuple, Callable, List, Union, Dict, Any
 from functools import wraps
 from .output_types import Actions, SentenceOutput, DisplayText
@@ -7,6 +8,10 @@ from ..config_manager import TTSPreprocessorConfig
 from ..utils.sentence_divider import SentenceDivider
 from ..utils.sentence_divider import SentenceWithTags, TagState
 from loguru import logger
+
+
+def _has_speakable_text(text: str) -> bool:
+    return bool(re.search(r"[\w\u4e00-\u9fff]", text or ""))
 
 
 def sentence_divider(
@@ -197,6 +202,12 @@ def tts_filter(
                             ignore_asterisks=config.ignore_asterisks,
                             ignore_angle_brackets=config.ignore_angle_brackets,
                         )
+                        if not _has_speakable_text(tts) and display.text.strip():
+                            logger.warning(
+                                "LLM produced non-speakable response, using fallback TTS text."
+                            )
+                            display.text = "我在，刚刚没说清楚。"
+                            tts = display.text
 
                     logger.debug(f"[{display.name}] display: {display.text}")
                     logger.debug(f"[{display.name}] tts: {tts}")
