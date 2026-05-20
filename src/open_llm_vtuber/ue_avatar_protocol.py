@@ -100,6 +100,7 @@ async def send_audio_payload(payload: dict[str, Any], username: str = "User") ->
     volumes = payload.get("volumes") or []
     slice_length = payload.get("slice_length") or 20
     duration = len(volumes) * slice_length / 1000
+    server_perf = payload.get("server_perf") or {}
 
     await ue_avatar_server.send(
         {
@@ -119,6 +120,8 @@ async def send_audio_payload(payload: dict[str, Any], username: str = "User") ->
                 "Action": payload.get("actions"),
                 "Images": [],
                 "Lips": [],
+                "ServerTurnId": server_perf.get("turn_id", ""),
+                "ServerElapsedMs": server_perf.get("elapsed_ms"),
             },
             "Username": username,
             "robot": f"{UE_PUBLIC_BASE_URL}/robot/Speaking.jpg",

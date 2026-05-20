@@ -1,9 +1,10 @@
 import asyncio
 import json
 import re
+import time
 import uuid
 from datetime import datetime
-from typing import List, Optional, Dict
+from typing import Any, List, Optional, Dict
 from loguru import logger
 
 from ..agent.output_types import DisplayText, Actions
@@ -17,9 +18,12 @@ from .types import WebSocketSend
 class TTSTaskManager:
     """Manages TTS tasks and ensures ordered delivery to frontend while allowing parallel TTS generation"""
 
-    def __init__(self, username: str = "User") -> None:
+    def __init__(
+        self, username: str = "User", timing_context: Optional[Dict[str, Any]] = None
+    ) -> None:
         self.task_list: List[asyncio.Task] = []
         self.username = username
+        self.timing_context = timing_context
         self._lock = asyncio.Lock()
         # Queue to store ordered payloads
         self._payload_queue: asyncio.Queue[Dict] = asyncio.Queue()
@@ -67,6 +71,7 @@ class TTSTaskManager:
         logger.debug(
             f"🏃Queuing TTS task for: '''{tts_text}''' (by {display_text.name})"
         )
+        self._log_once("first_tts_task_queued_logged", "first_tts_task_queued")
 
         # Get current sequence number
         current_sequence = self._sequence_counter
@@ -107,8 +112,12 @@ class TTSTaskManager:
                 # Send payloads in order
                 while self._next_sequence_to_send in buffered_payloads:
                     next_payload = buffered_payloads.pop(self._next_sequence_to_send)
+                    if next_payload.get("audio"):
+                        next_payload["server_perf"] = self._server_perf_payload()
                     await send_audio_payload(next_payload, username=self.username)
                     await websocket_send(json.dumps(next_payload))
+                    if next_payload.get("audio"):
+                        self._log_once("first_audio_sent_logged", "first_audio_sent")
                     self._next_sequence_to_send += 1
 
                 self._payload_queue.task_done()
@@ -143,6 +152,9 @@ class TTSTaskManager:
         audio_file_path = None
         try:
             audio_file_path = await self._generate_audio(tts_engine, tts_text)
+            self._log_once(
+                "first_tts_audio_generated_logged", "first_tts_audio_generated"
+            )
             payload = prepare_audio_payload(
                 audio_path=audio_file_path,
                 display_text=display_text,
@@ -183,3 +195,35 @@ class TTSTaskManager:
         self._next_sequence_to_send = 0
         # Create a new queue to clear any pending items
         self._payload_queue = asyncio.Queue()
+
+    def _log_once(self, flag_name: str, event: str) -> None:
+        if not self.timing_context or self.timing_context.get(flag_name):
+            return
+
+        self.timing_context[flag_name] = True
+        turn_started_ns = self.timing_context.get("turn_started_ns")
+        if not turn_started_ns:
+            return
+
+        elapsed_ms = (time.perf_counter_ns() - turn_started_ns) / 1_000_000
+        logger.info(
+            "PERF conversation turn_id={} event={} elapsed_ms={:.3f}",
+            self.timing_context.get("turn_id", ""),
+            event,
+            elapsed_ms,
+        )
+
+    def _server_perf_payload(self) -> Optional[Dict[str, Any]]:
+        if not self.timing_context:
+            return None
+
+        turn_started_ns = self.timing_context.get("turn_started_ns")
+        if not turn_started_ns:
+            return None
+
+        return {
+            "turn_id": self.timing_context.get("turn_id", ""),
+            "elapsed_ms": round(
+                (time.perf_counter_ns() - turn_started_ns) / 1_000_000, 3
+            ),
+        }

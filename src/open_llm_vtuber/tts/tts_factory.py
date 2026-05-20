@@ -57,6 +57,36 @@ class TTSFactory:
                 speed=kwargs.get("speed"),
                 api_name=kwargs.get("api_name"),
             )
+        elif engine_type == "cosyvoice3_tts":
+            from .cosyvoice3_tts import TTSEngine as Cosyvoice3TTSEngine
+
+            return Cosyvoice3TTSEngine(
+                base_url=kwargs.get("base_url"),
+                mode=kwargs.get("mode"),
+                spk_id=kwargs.get("spk_id"),
+                prompt_text=kwargs.get("prompt_text"),
+                prompt_wav=kwargs.get("prompt_wav"),
+                instruct_text=kwargs.get("instruct_text"),
+                sample_rate=kwargs.get("sample_rate"),
+                timeout=kwargs.get("timeout"),
+            )
+        elif engine_type == "voxcpm2_tts":
+            from .voxcpm2_tts import TTSEngine as VoxCPM2TTSEngine
+
+            return VoxCPM2TTSEngine(
+                base_url=kwargs.get("base_url"),
+                control=kwargs.get("control"),
+                prompt_wav_path=kwargs.get("prompt_wav_path"),
+                prompt_text=kwargs.get("prompt_text"),
+                reference_wav_path=kwargs.get("reference_wav_path"),
+                cfg_value=kwargs.get("cfg_value"),
+                inference_timesteps=kwargs.get("inference_timesteps"),
+                normalize=kwargs.get("normalize"),
+                denoise=kwargs.get("denoise"),
+                retry_badcase=kwargs.get("retry_badcase"),
+                sample_rate=kwargs.get("sample_rate"),
+                timeout=kwargs.get("timeout"),
+            )
         elif engine_type == "melo_tts":
             from .melo_tts import TTSEngine as MeloTTSEngine
 

@@ -151,11 +151,16 @@ class EdgeTTSConfig(I18nMixin):
     """Configuration for Edge TTS."""
 
     voice: str = Field(..., alias="voice")
+    proxy: Optional[str] = Field(None, alias="proxy")
 
     DESCRIPTIONS: ClassVar[Dict[str, Description]] = {
         "voice": Description(
             en="Voice name to use for Edge TTS (use 'edge-tts --list-voices' to list available voices)",
             zh="Edge TTS 使用的语音名称（使用 'edge-tts --list-voices' 列出可用语音）",
+        ),
+        "proxy": Description(
+            en="HTTP proxy for Edge TTS WebSocket requests",
+            zh="Edge TTS WebSocket 请求使用的 HTTP 代理",
         ),
     }
 
@@ -229,6 +234,71 @@ class Cosyvoice2TTSConfig(I18nMixin):
         "seed": Description(en="Random seed", zh="随机种子"),
         "speed": Description(en="Speech speed multiplier", zh="语速倍数"),
         "api_name": Description(en="API endpoint name", zh="API 端点名称"),
+    }
+
+
+class Cosyvoice3TTSConfig(I18nMixin):
+    """Configuration for CosyVoice3 FastAPI TTS."""
+
+    base_url: str = Field(..., alias="base_url")
+    mode: str = Field(..., alias="mode")
+    spk_id: str = Field(..., alias="spk_id")
+    prompt_text: str = Field(..., alias="prompt_text")
+    prompt_wav: str = Field(..., alias="prompt_wav")
+    instruct_text: str = Field(..., alias="instruct_text")
+    sample_rate: int = Field(..., alias="sample_rate")
+    timeout: int = Field(..., alias="timeout")
+
+    DESCRIPTIONS: ClassVar[Dict[str, Description]] = {
+        "base_url": Description(
+            en="URL of the CosyVoice3 FastAPI server",
+            zh="CosyVoice3 FastAPI 服务 URL",
+        ),
+        "mode": Description(
+            en="Inference mode: sft, zero_shot, cross_lingual, instruct, or instruct2",
+            zh="推理模式：sft、zero_shot、cross_lingual、instruct 或 instruct2",
+        ),
+        "spk_id": Description(en="Speaker ID", zh="说话人 ID"),
+        "prompt_text": Description(en="Prompt text", zh="提示文本"),
+        "prompt_wav": Description(en="Prompt WAV file path", zh="提示音频 WAV 路径"),
+        "instruct_text": Description(en="Instruction text", zh="指令文本"),
+        "sample_rate": Description(en="PCM audio sample rate", zh="PCM 音频采样率"),
+        "timeout": Description(en="Request timeout in seconds", zh="请求超时时间（秒）"),
+    }
+
+
+class VoxCPM2TTSConfig(I18nMixin):
+    """Configuration for VoxCPM2 NanoVLLM HTTP TTS."""
+
+    base_url: str = Field(..., alias="base_url")
+    control: str = Field("", alias="control")
+    prompt_wav_path: str = Field("", alias="prompt_wav_path")
+    prompt_text: str = Field("", alias="prompt_text")
+    reference_wav_path: str = Field("", alias="reference_wav_path")
+    cfg_value: float = Field(2.0, alias="cfg_value")
+    inference_timesteps: int = Field(5, alias="inference_timesteps")
+    normalize: bool = Field(False, alias="normalize")
+    denoise: bool = Field(False, alias="denoise")
+    retry_badcase: bool = Field(False, alias="retry_badcase")
+    sample_rate: int = Field(48000, alias="sample_rate")
+    timeout: float = Field(180, alias="timeout")
+
+    DESCRIPTIONS: ClassVar[Dict[str, Description]] = {
+        "base_url": Description(
+            en="URL of the VoxCPM2 NanoVLLM HTTP server",
+            zh="VoxCPM2 NanoVLLM HTTP 服务 URL",
+        ),
+        "control": Description(en="Voice design control text", zh="音色描述控制文本"),
+        "prompt_wav_path": Description(en="Prompt WAV file path", zh="提示音频 WAV 路径"),
+        "prompt_text": Description(en="Prompt text paired with prompt WAV", zh="提示音频对应文本"),
+        "reference_wav_path": Description(en="Reference WAV file path", zh="参考音频 WAV 路径"),
+        "cfg_value": Description(en="Classifier-free guidance value", zh="CFG 引导值"),
+        "inference_timesteps": Description(en="Inference timesteps", zh="推理步数"),
+        "normalize": Description(en="Normalize generated audio", zh="归一化生成音频"),
+        "denoise": Description(en="Denoise generated audio", zh="降噪生成音频"),
+        "retry_badcase": Description(en="Retry badcase generations", zh="异常生成重试"),
+        "sample_rate": Description(en="PCM audio sample rate", zh="PCM 音频采样率"),
+        "timeout": Description(en="Request timeout in seconds", zh="请求超时时间（秒）"),
     }
 
 
@@ -689,6 +759,8 @@ class TTSConfig(I18nMixin):
         "edge_tts",
         "cosyvoice_tts",
         "cosyvoice2_tts",
+        "cosyvoice3_tts",
+        "voxcpm2_tts",
         "melo_tts",
         "coqui_tts",
         "x_tts",
@@ -709,6 +781,8 @@ class TTSConfig(I18nMixin):
     edge_tts: Optional[EdgeTTSConfig] = Field(None, alias="edge_tts")
     cosyvoice_tts: Optional[CosyvoiceTTSConfig] = Field(None, alias="cosyvoice_tts")
     cosyvoice2_tts: Optional[Cosyvoice2TTSConfig] = Field(None, alias="cosyvoice2_tts")
+    cosyvoice3_tts: Optional[Cosyvoice3TTSConfig] = Field(None, alias="cosyvoice3_tts")
+    voxcpm2_tts: Optional[VoxCPM2TTSConfig] = Field(None, alias="voxcpm2_tts")
     melo_tts: Optional[MeloTTSConfig] = Field(None, alias="melo_tts")
     coqui_tts: Optional[CoquiTTSConfig] = Field(None, alias="coqui_tts")
     x_tts: Optional[XTTSConfig] = Field(None, alias="x_tts")
@@ -739,6 +813,14 @@ class TTSConfig(I18nMixin):
         ),
         "cosyvoice2_tts": Description(
             en="Configuration for Cosyvoice2 TTS", zh="Cosyvoice2 TTS 配置"
+        ),
+        "cosyvoice3_tts": Description(
+            en="Configuration for CosyVoice3 FastAPI TTS",
+            zh="CosyVoice3 FastAPI TTS 配置",
+        ),
+        "voxcpm2_tts": Description(
+            en="Configuration for VoxCPM2 NanoVLLM TTS",
+            zh="VoxCPM2 NanoVLLM TTS 配置",
         ),
         "melo_tts": Description(en="Configuration for Melo TTS", zh="Melo TTS 配置"),
         "coqui_tts": Description(en="Configuration for Coqui TTS", zh="Coqui TTS 配置"),
@@ -786,6 +868,10 @@ class TTSConfig(I18nMixin):
             values.cosyvoice_tts.model_validate(values.cosyvoice_tts.model_dump())
         elif tts_model == "cosyvoice2_tts" and values.cosyvoice2_tts is not None:
             values.cosyvoice2_tts.model_validate(values.cosyvoice2_tts.model_dump())
+        elif tts_model == "cosyvoice3_tts" and values.cosyvoice3_tts is not None:
+            values.cosyvoice3_tts.model_validate(values.cosyvoice3_tts.model_dump())
+        elif tts_model == "voxcpm2_tts" and values.voxcpm2_tts is not None:
+            values.voxcpm2_tts.model_validate(values.voxcpm2_tts.model_dump())
         elif tts_model == "melo_tts" and values.melo_tts is not None:
             values.melo_tts.model_validate(values.melo_tts.model_dump())
         elif tts_model == "coqui_tts" and values.coqui_tts is not None:
