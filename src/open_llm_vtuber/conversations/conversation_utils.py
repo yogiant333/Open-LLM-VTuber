@@ -14,7 +14,7 @@ from ..asr.asr_interface import ASRInterface
 from ..live2d_model import Live2dModel
 from ..tts.tts_interface import TTSInterface
 from ..utils.stream_audio import prepare_audio_payload
-from ..ue_avatar_protocol import send_audio_end, send_log, send_question
+from ..ue_avatar_protocol import send_audio_end, send_audio_payload, send_log, send_question
 
 
 # Convert class methods to standalone functions
@@ -51,6 +51,7 @@ async def process_agent_output(
     websocket_send: WebSocketSend,
     tts_manager: TTSTaskManager,
     translate_engine: Optional[Any] = None,
+    username: str = "User",
 ) -> str:
     """Process agent output with character information and optional translation"""
     output.display_text.name = character_config.character_name
@@ -68,7 +69,7 @@ async def process_agent_output(
                 translate_engine,
             )
         elif isinstance(output, AudioOutput):
-            full_response = await handle_audio_output(output, websocket_send)
+            full_response = await handle_audio_output(output, websocket_send, username)
         else:
             logger.warning(f"Unknown output type: {type(output)}")
     except Exception as e:
@@ -117,6 +118,7 @@ async def handle_sentence_output(
 async def handle_audio_output(
     output: AudioOutput,
     websocket_send: WebSocketSend,
+    username: str = "User",
 ) -> str:
     """Process and send AudioOutput directly to the client"""
     full_response = ""
@@ -127,13 +129,14 @@ async def handle_audio_output(
             display_text=display_text,
             actions=actions.to_dict() if actions else None,
         )
+        await send_audio_payload(audio_payload, username=username)
         await websocket_send(json.dumps(audio_payload))
     return full_response
 
 
-async def send_conversation_start_signals(websocket_send: WebSocketSend) -> None:
+async def send_conversation_start_signals(websocket_send: WebSocketSend, username: str = "User") -> None:
     """Send initial conversation signals"""
-    await send_log("思考中...")
+    await send_log("思考中...", username=username)
     await websocket_send(
         json.dumps(
             {
@@ -149,17 +152,18 @@ async def process_user_input(
     user_input: Union[str, np.ndarray],
     asr_engine: ASRInterface,
     websocket_send: WebSocketSend,
+    username: str = "User",
 ) -> str:
     """Process user input, converting audio to text if needed"""
     if isinstance(user_input, np.ndarray):
         logger.info("Transcribing audio input...")
         input_text = await asr_engine.async_transcribe_np(user_input)
-        await send_question(input_text)
+        await send_question(input_text, username=username)
         await websocket_send(
             json.dumps({"type": "user-input-transcription", "text": input_text})
         )
         return input_text
-    await send_question(user_input)
+    await send_question(user_input, username=username)
     return user_input
 
 
@@ -172,8 +176,8 @@ async def finalize_conversation_turn(
     """Finalize a conversation turn"""
     if tts_manager.task_list:
         await asyncio.gather(*tts_manager.task_list)
-        await send_audio_end()
-        await send_log("")
+        await send_audio_end(username=client_uid)
+        await send_log("", username=client_uid)
         await websocket_send(json.dumps({"type": "backend-synth-complete"}))
 
         response = await message_handler.wait_for_response(

@@ -16,10 +16,19 @@ UE_AUDIO_CACHE_DIR = Path("cache") / "ue_audio"
 UE_AUDIO_CACHE_MAX_AGE_SECONDS = 60 * 60
 UE_PUBLIC_BASE_URL = os.getenv("OPEN_LLM_VTUBER_PUBLIC_URL", "http://127.0.0.1:18080")
 
-_conversation_id = ""
-_audio_message_no = 0
-_has_active_audio = False
-_has_active_text = False
+_session_states: dict[str, dict[str, Any]] = {}
+
+
+def _state_for(username: str) -> dict[str, Any]:
+    return _session_states.setdefault(
+        username,
+        {
+            "conversation_id": "",
+            "audio_message_no": 0,
+            "has_active_audio": False,
+            "has_active_text": False,
+        },
+    )
 
 
 async def send_question(text: str, username: str = "User") -> None:
@@ -52,30 +61,27 @@ async def send_log(text: str, username: str = "User") -> None:
 
 
 async def send_text(text: str, is_end: bool = False, username: str = "User") -> None:
-    global _has_active_text
-
     normalized = text.strip()
     if not normalized and not is_end:
         return
 
+    state = _state_for(username)
     await ue_avatar_server.send(
         {
             "Topic": "human",
             "Data": {
                 "Key": "text",
                 "Value": normalized,
-                "IsFirst": 0 if _has_active_text else 1,
+                "IsFirst": 0 if state["has_active_text"] else 1,
                 "IsEnd": 1 if is_end else 0,
             },
             "Username": username,
         }
     )
-    _has_active_text = not is_end
+    state["has_active_text"] = not is_end
 
 
 async def send_audio_payload(payload: dict[str, Any], username: str = "User") -> None:
-    global _audio_message_no, _conversation_id, _has_active_audio
-
     display_text = payload.get("display_text") or {}
     text = display_text.get("text", "") if isinstance(display_text, dict) else ""
     await send_text(text, username=username)
@@ -84,10 +90,11 @@ async def send_audio_payload(payload: dict[str, Any], username: str = "User") ->
     if not audio_base64:
         return
 
-    if not _has_active_audio:
-        _conversation_id = _create_conversation_id()
-        _audio_message_no = 0
-        _has_active_audio = True
+    state = _state_for(username)
+    if not state["has_active_audio"]:
+        state["conversation_id"] = _create_conversation_id()
+        state["audio_message_no"] = 0
+        state["has_active_audio"] = True
 
     audio_path, audio_url = _cache_audio_base64(audio_base64)
     volumes = payload.get("volumes") or []
@@ -104,10 +111,10 @@ async def send_audio_payload(payload: dict[str, Any], username: str = "User") ->
                 "Text": text,
                 "Time": duration,
                 "Type": 2,
-                "IsFirst": 1 if _audio_message_no == 0 else 0,
+                "IsFirst": 1 if state["audio_message_no"] == 0 else 0,
                 "IsEnd": 0,
-                "CONV_ID": _conversation_id,
-                "CONV_MSG_NO": _audio_message_no,
+                "CONV_ID": state["conversation_id"],
+                "CONV_MSG_NO": state["audio_message_no"],
                 "Sentiment": 0,
                 "Action": payload.get("actions"),
                 "Images": [],
@@ -117,16 +124,15 @@ async def send_audio_payload(payload: dict[str, Any], username: str = "User") ->
             "robot": f"{UE_PUBLIC_BASE_URL}/robot/Speaking.jpg",
         }
     )
-    _audio_message_no += 1
+    state["audio_message_no"] += 1
 
 
 async def send_audio_end(username: str = "User") -> None:
-    global _audio_message_no, _conversation_id, _has_active_audio, _has_active_text
-
-    if _has_active_text:
+    state = _state_for(username)
+    if state["has_active_text"]:
         await send_text("", is_end=True, username=username)
 
-    if not _has_active_audio:
+    if not state["has_active_audio"]:
         return
 
     await ue_avatar_server.send(
@@ -141,8 +147,8 @@ async def send_audio_end(username: str = "User") -> None:
                 "Type": 2,
                 "IsFirst": 0,
                 "IsEnd": 1,
-                "CONV_ID": _conversation_id,
-                "CONV_MSG_NO": _audio_message_no,
+                "CONV_ID": state["conversation_id"],
+                "CONV_MSG_NO": state["audio_message_no"],
                 "Sentiment": 0,
                 "Images": [],
                 "Lips": [],
@@ -151,10 +157,10 @@ async def send_audio_end(username: str = "User") -> None:
             "robot": f"{UE_PUBLIC_BASE_URL}/robot/Speaking.jpg",
         }
     )
-    _conversation_id = ""
-    _audio_message_no = 0
-    _has_active_audio = False
-    _has_active_text = False
+    state["conversation_id"] = ""
+    state["audio_message_no"] = 0
+    state["has_active_audio"] = False
+    state["has_active_text"] = False
 
 
 def _cache_audio_base64(audio: str) -> tuple[Path, str]:

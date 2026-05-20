@@ -17,8 +17,9 @@ from .types import WebSocketSend
 class TTSTaskManager:
     """Manages TTS tasks and ensures ordered delivery to frontend while allowing parallel TTS generation"""
 
-    def __init__(self) -> None:
+    def __init__(self, username: str = "User") -> None:
         self.task_list: List[asyncio.Task] = []
+        self.username = username
         self._lock = asyncio.Lock()
         # Queue to store ordered payloads
         self._payload_queue: asyncio.Queue[Dict] = asyncio.Queue()
@@ -106,7 +107,7 @@ class TTSTaskManager:
                 # Send payloads in order
                 while self._next_sequence_to_send in buffered_payloads:
                     next_payload = buffered_payloads.pop(self._next_sequence_to_send)
-                    await send_audio_payload(next_payload)
+                    await send_audio_payload(next_payload, username=self.username)
                     await websocket_send(json.dumps(next_payload))
                     self._next_sequence_to_send += 1
 
