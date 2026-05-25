@@ -24,6 +24,11 @@ class ToolExecutor:
         self._mcp_client = mcp_client
         self._tool_manager = tool_manager
 
+    def _utc_timestamp(self) -> str:
+        return datetime.datetime.now(datetime.timezone.utc).isoformat().replace(
+            "+00:00", "Z"
+        )
+
     def parse_tool_call(self, call: Union[Dict[str, Any], ToolCallObject]) -> tuple:
         """Parse tool call from different formats.
 
@@ -180,22 +185,18 @@ class ToolExecutor:
                 status_update = {
                     "type": "tool_call_status",
                     "tool_id": tool_id
-                    or f"parse_error_{datetime.datetime.now(datetime.timezone.utc).isoformat()}",
+                    or f"parse_error_{self._utc_timestamp()}",
                     "tool_name": tool_name or "Unknown Tool",
                     "status": "error",
                     "content": result_content,
-                    "timestamp": datetime.datetime.now(
-                        datetime.timezone.utc
-                    ).isoformat()
-                    + "Z",
+                    "timestamp": self._utc_timestamp(),
                 }
                 yield status_update
                 # Even on parse error, we might need to format a result for the LLM
                 # Use dummy values or the error message
                 formatted_result = self.format_tool_result(
                     caller_mode,
-                    tool_id
-                    or f"parse_error_{datetime.datetime.now(datetime.timezone.utc).isoformat()}",
+                    tool_id or f"parse_error_{self._utc_timestamp()}",
                     result_content,
                     True,  # is_error
                 )
@@ -210,8 +211,7 @@ class ToolExecutor:
                 "tool_name": tool_name,
                 "status": "running",
                 "content": f"Input: {json.dumps(tool_input)}",
-                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
-                + "Z",
+                "timestamp": self._utc_timestamp(),
             }
 
             # Execute the tool
@@ -273,8 +273,7 @@ class ToolExecutor:
                 "content": status_content
                 if not is_error
                 else f"Error: {text_content}",  # Use descriptive content or error message
-                "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
-                + "Z",
+                "timestamp": self._utc_timestamp(),
             }
 
             # For stagehand_navigate tool, include browser view links if available
