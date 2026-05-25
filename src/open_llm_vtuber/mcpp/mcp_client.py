@@ -159,10 +159,14 @@ class MCPClient:
         logger.info(
             f"MCPC: Closing client instance and {len(self.active_sessions)} active connections..."
         )
-        await self.exit_stack.aclose()
-        self.active_sessions.clear()
-        self._list_tools_cache.clear()  # Clear cache on close
-        self.exit_stack = AsyncExitStack()
+        try:
+            await self.exit_stack.aclose()
+        except RuntimeError as e:
+            logger.warning(f"MCPC: Error while closing MCP transports: {e}")
+        finally:
+            self.active_sessions.clear()
+            self._list_tools_cache.clear()  # Clear cache on close
+            self.exit_stack = AsyncExitStack()
         logger.info("MCPC: Client instance closed.")
 
     async def __aenter__(self) -> "MCPClient":
