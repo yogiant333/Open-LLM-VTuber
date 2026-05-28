@@ -304,6 +304,15 @@ WSL 脚本入口是仓库根目录的 `start_wsl.sh`，它用 `tmux` 分别托�
 | 单人会话 | `process_single_conversation()` |
 | 群聊会话 | `process_group_conversation()` |
 
+单人会话对重复 `text-input` 采用重启策略，而不是忽略或固定延迟聚合：
+
+1. 第一条 `text-input` 立即创建 `current_conversation_tasks[client_uid]` 并启动 `process_single_conversation()`。
+2. 如果任务未完成时又收到同一 `client_uid` 的新输入，`handle_conversation_trigger()` 会取消旧任务并等待取消完成。
+3. 旧任务在开始阶段已经把前序用户文本写入 agent memory；新任务把新文本作为新的 `role=user` 消息加入上下文。
+4. 取消后的旧 assistant 输出不再继续发送，最终只保留重启后的一次数字人回复。
+
+这个策略用于 UE 示例问题或文本框快速连续发送：有几条用户输入就保留几条用户消息，但不产生多次数字人回复。语音打断仍走 `interrupt-signal`，用于已播放/正在播放回复时的显式打断。
+
 单人会话流程：
 
 ```text

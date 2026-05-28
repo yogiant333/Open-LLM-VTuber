@@ -114,6 +114,14 @@ class LettaAgent(AgentInterface):
         Prepare messages list without image support.
         """
         messages = []
+        separate_user_messages = bool(
+            input_data.metadata and input_data.metadata.get("separate_user_messages")
+        )
+        if separate_user_messages and not input_data.images:
+            for text_data in input_data.texts:
+                if text_data.source == TextSource.INPUT and text_data.content.strip():
+                    messages.append({"role": "user", "content": text_data.content})
+            return messages
 
         if input_data.images:
             content = []
