@@ -96,6 +96,21 @@ async def handle_conversation_trigger(
             )
     else:
         # Use client_uid as task key for individual conversations
+        existing_task = current_conversation_tasks.get(client_uid)
+        if existing_task and not existing_task.done():
+            logger.info(
+                f"Restarting active single conversation for {client_uid} with new user input"
+            )
+            existing_task.cancel()
+            try:
+                await existing_task
+            except asyncio.CancelledError:
+                logger.info(f"Previous conversation task for {client_uid} cancelled.")
+            except Exception as exc:
+                logger.error(
+                    f"Previous conversation task for {client_uid} failed while restarting: {exc}"
+                )
+
         current_conversation_tasks[client_uid] = asyncio.create_task(
             process_single_conversation(
                 context=context,

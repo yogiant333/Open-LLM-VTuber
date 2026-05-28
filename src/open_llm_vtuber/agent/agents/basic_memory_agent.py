@@ -8,6 +8,8 @@ from typing import (
     Union,
     Optional,
 )
+import json
+import re
 from loguru import logger
 from .agent_interface import AgentInterface
 from ..output_types import SentenceOutput, DisplayText
@@ -192,6 +194,72 @@ class BasicMemoryAgent(AgentInterface):
                 logger.warning(f"Skipping invalid message from history: {msg}")
         logger.info(f"Loaded {len(self._memory)} messages from history.")
 
+    async def generate_suggestions(
+        self,
+        user_text: str,
+        assistant_text: str,
+        count: int = 3,
+        context: str = "follow_up",
+    ) -> List[str]:
+        """Generate short UI suggestions without writing them into chat memory."""
+        prompt = (
+            "你是电网数字人助手。请生成适合按钮点击的中文短问题。\n"
+            f"场景: {context}\n"
+            f"用户问题: {user_text or '暂无'}\n"
+            f"数字人回答: {assistant_text or '暂无'}\n\n"
+            f"请生成 {count} 个问题，要求：\n"
+            "- 每个问题不超过 18 个中文字。\n"
+            "- 不重复用户原问题。\n"
+            "- 和当前电网业务场景强相关。\n"
+            "- 适合点击后直接发送。\n"
+            "- 只返回 JSON 字符串数组，不要 Markdown，不要解释。"
+        )
+        messages = [{"role": "user", "content": prompt}]
+        chunks: List[str] = []
+
+        async for event in self._llm.chat_completion(messages, self._system):
+            if isinstance(event, str):
+                chunks.append(event)
+            elif isinstance(event, dict) and event.get("type") == "text_delta":
+                chunks.append(event.get("text", ""))
+
+        return self._parse_suggestion_response("".join(chunks), count)
+
+    @staticmethod
+    def _parse_suggestion_response(raw_text: str, count: int) -> List[str]:
+        text = raw_text.strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
+
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            logger.warning(f"Failed to parse suggestion JSON: {raw_text}")
+            return []
+
+        if not isinstance(parsed, list):
+            return []
+
+        suggestions: List[str] = []
+        seen: set[str] = set()
+        for item in parsed:
+            if not isinstance(item, str):
+                continue
+            question = item.strip().strip("，。！？? ")
+            if not question:
+                continue
+            if not question.endswith(("？", "?")):
+                question = f"{question}？"
+            if question in seen:
+                continue
+            seen.add(question)
+            suggestions.append(question)
+            if len(suggestions) >= count:
+                break
+
+        return suggestions
+
     def handle_interrupt(self, heard_response: str) -> None:
         """Handle user interruption."""
         if self._interrupt_handled:
@@ -242,6 +310,25 @@ class BasicMemoryAgent(AgentInterface):
     def _to_messages(self, input_data: BatchInput) -> List[Dict[str, Any]]:
         """Prepare messages for LLM API call."""
         messages = self._memory.copy()
+        separate_user_messages = bool(
+            input_data.metadata and input_data.metadata.get("separate_user_messages")
+        )
+        if separate_user_messages and not input_data.images:
+            skip_memory = bool(
+                input_data.metadata and input_data.metadata.get("skip_memory", False)
+            )
+            appended_message = False
+            for text_data in input_data.texts:
+                if text_data.source != TextSource.INPUT or not text_data.content.strip():
+                    continue
+                messages.append({"role": "user", "content": text_data.content})
+                appended_message = True
+                if not skip_memory:
+                    self._add_message(text_data.content, "user")
+            if not appended_message:
+                logger.warning("No content generated for user message.")
+            return messages
+
         user_content = []
         text_prompt = self._to_text_prompt(input_data)
         if text_prompt:

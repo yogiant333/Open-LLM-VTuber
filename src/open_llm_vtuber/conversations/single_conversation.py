@@ -12,6 +12,7 @@ from .conversation_utils import (
     process_user_input,
     finalize_conversation_turn,
     cleanup_conversation,
+    send_ui_suggestions,
     EMOJI_LIST,
 )
 from .types import WebSocketSend
@@ -21,13 +22,14 @@ from ..service_context import ServiceContext
 
 # Import necessary types from agent outputs
 from ..agent.output_types import SentenceOutput, AudioOutput
+from ..ue_avatar_protocol import send_question
 
 
 async def process_single_conversation(
     context: ServiceContext,
     websocket_send: WebSocketSend,
     client_uid: str,
-    user_input: Union[str, np.ndarray],
+    user_input: Union[str, List[str], np.ndarray],
     images: Optional[List[Dict[str, Any]]] = None,
     session_emoji: str = np.random.choice(EMOJI_LIST),
     metadata: Optional[Dict[str, Any]] = None,
@@ -65,9 +67,22 @@ async def process_single_conversation(
         logger.info(f"New Conversation Chain {session_emoji} started!")
 
         # Process user input
-        input_text = await process_user_input(
-            user_input, context.asr_engine, websocket_send, username=client_uid
-        )
+        if isinstance(user_input, list):
+            input_text = [text.strip() for text in user_input if text.strip()]
+            for text in input_text:
+                await send_question(text, username=client_uid)
+                await websocket_send(
+                    json.dumps(
+                        {
+                            "type": "user-input-transcription",
+                            "text": text,
+                        }
+                    )
+                )
+        else:
+            input_text = await process_user_input(
+                user_input, context.asr_engine, websocket_send, username=client_uid
+            )
         input_ready_ms = (time.perf_counter_ns() - turn_started_ns) / 1_000_000
         logger.info(
             "PERF conversation turn_id={} event=input_ready input_type={} elapsed_ms={:.3f}",
@@ -87,13 +102,15 @@ async def process_single_conversation(
         # Store user message (check if we should skip storing to history)
         skip_history = metadata and metadata.get("skip_history", False)
         if context.history_uid and not skip_history:
-            store_message(
-                conf_uid=context.character_config.conf_uid,
-                history_uid=context.history_uid,
-                role="human",
-                content=input_text,
-                name=context.character_config.human_name,
-            )
+            input_history_items = input_text if isinstance(input_text, list) else [input_text]
+            for input_history_text in input_history_items:
+                store_message(
+                    conf_uid=context.character_config.conf_uid,
+                    history_uid=context.history_uid,
+                    role="human",
+                    content=input_history_text,
+                    name=context.character_config.human_name,
+                )
 
         if skip_history:
             logger.debug("Skipping storing user input to history (proactive speak)")
@@ -176,6 +193,15 @@ async def process_single_conversation(
             websocket_send=websocket_send,
             client_uid=client_uid,
         )
+
+        if full_response:
+            await send_ui_suggestions(
+                context=context,
+                username=client_uid,
+                user_text="\n".join(input_text) if isinstance(input_text, list) else input_text,
+                assistant_text=full_response,
+                suggestion_context="follow_up",
+            )
 
         if context.history_uid and full_response:  # Check full_response before storing
             store_message(

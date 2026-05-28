@@ -14,20 +14,42 @@ from ..asr.asr_interface import ASRInterface
 from ..live2d_model import Live2dModel
 from ..tts.tts_interface import TTSInterface
 from ..utils.stream_audio import prepare_audio_payload
-from ..ue_avatar_protocol import send_audio_end, send_audio_payload, send_log, send_question
+from ..ue_avatar_protocol import (
+    send_audio_end,
+    send_audio_payload,
+    send_log,
+    send_question,
+    send_suggestions,
+)
+
+
+INITIAL_SUGGESTION_FALLBACKS = [
+    "今日用电负荷如何？",
+    "电网运行是否稳定？",
+    "重点工程进展情况？",
+]
+
+FOLLOW_UP_SUGGESTION_FALLBACKS = [
+    "还有哪些风险点？",
+    "需要怎么调度？",
+    "和昨日相比如何？",
+]
 
 
 # Convert class methods to standalone functions
 def create_batch_input(
-    input_text: str,
+    input_text: Union[str, List[str]],
     images: Optional[List[Dict[str, Any]]],
     from_name: str,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> BatchInput:
     """Create batch input for agent processing"""
+    input_texts = input_text if isinstance(input_text, list) else [input_text]
     return BatchInput(
         texts=[
-            TextData(source=TextSource.INPUT, content=input_text, from_name=from_name)
+            TextData(source=TextSource.INPUT, content=text, from_name=from_name)
+            for text in input_texts
+            if text.strip()
         ],
         images=[
             ImageData(
@@ -81,6 +103,56 @@ async def process_agent_output(
         )
 
     return full_response
+
+
+async def generate_ui_suggestions(
+    context: Any,
+    user_text: str = "",
+    assistant_text: str = "",
+    suggestion_context: str = "follow_up",
+    count: int = 3,
+) -> list[str]:
+    """Generate UI-only suggested questions without affecting conversation memory."""
+    fallback = (
+        INITIAL_SUGGESTION_FALLBACKS
+        if suggestion_context == "initial"
+        else FOLLOW_UP_SUGGESTION_FALLBACKS
+    )
+    agent = getattr(context, "agent_engine", None)
+    generator = getattr(agent, "generate_suggestions", None)
+    if not callable(generator):
+        logger.warning("Current agent does not support UI suggestion generation.")
+        return fallback[:count]
+
+    try:
+        suggestions = await generator(
+            user_text=user_text,
+            assistant_text=assistant_text,
+            count=count,
+            context=suggestion_context,
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to generate UI suggestions: {exc}")
+        return fallback[:count]
+
+    return suggestions[:count] if suggestions else fallback[:count]
+
+
+async def send_ui_suggestions(
+    context: Any,
+    username: str,
+    user_text: str = "",
+    assistant_text: str = "",
+    suggestion_context: str = "follow_up",
+) -> list[str]:
+    suggestions = await generate_ui_suggestions(
+        context=context,
+        user_text=user_text,
+        assistant_text=assistant_text,
+        suggestion_context=suggestion_context,
+    )
+    await send_suggestions(suggestions, username=username, context=suggestion_context)
+    return suggestions
 
 
 async def handle_sentence_output(
