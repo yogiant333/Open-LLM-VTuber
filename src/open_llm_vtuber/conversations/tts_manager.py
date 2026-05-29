@@ -125,6 +125,12 @@ class TTSTaskManager:
             except asyncio.CancelledError:
                 break
 
+    async def wait_until_idle(self) -> None:
+        """Wait until generated TTS payloads have been sent in sequence."""
+        if self.task_list:
+            await asyncio.gather(*self.task_list)
+        await self._payload_queue.join()
+
     async def _send_silent_payload(
         self,
         display_text: DisplayText,

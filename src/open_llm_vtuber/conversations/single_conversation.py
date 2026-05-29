@@ -185,7 +185,7 @@ async def process_single_conversation(
 
         # Wait for any pending TTS tasks
         if tts_manager.task_list:
-            await asyncio.gather(*tts_manager.task_list)
+            await tts_manager.wait_until_idle()
             await websocket_send(json.dumps({"type": "backend-synth-complete"}))
 
         await finalize_conversation_turn(
