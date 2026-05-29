@@ -188,13 +188,27 @@ class TTSTaskManager:
 
     def clear(self) -> None:
         """Clear all pending tasks and reset state"""
+        for task in self.task_list:
+            task.add_done_callback(self._consume_task_result)
+            if not task.done():
+                task.cancel()
         self.task_list.clear()
         if self._sender_task:
+            self._sender_task.add_done_callback(self._consume_task_result)
             self._sender_task.cancel()
         self._sequence_counter = 0
         self._next_sequence_to_send = 0
         # Create a new queue to clear any pending items
         self._payload_queue = asyncio.Queue()
+
+    @staticmethod
+    def _consume_task_result(task: asyncio.Task) -> None:
+        try:
+            task.exception()
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logger.debug(f"Discarded cancelled TTS task result: {exc}")
 
     def _log_once(self, flag_name: str, event: str) -> None:
         if not self.timing_context or self.timing_context.get(flag_name):

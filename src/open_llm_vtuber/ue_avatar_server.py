@@ -20,6 +20,7 @@ class UeAvatarServer:
         self._thread: threading.Thread | None = None
         self._started = threading.Event()
         self._lock = threading.Lock()
+        self._send_lock: asyncio.Lock | None = None
         self._status_listener = None
 
     def set_status_listener(self, listener) -> None:
@@ -85,6 +86,29 @@ class UeAvatarServer:
         }
 
     async def send(self, message: dict[str, Any]) -> int:
+        loop = self._loop
+        if loop and loop.is_running():
+            try:
+                running_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                running_loop = None
+
+            if running_loop is not loop:
+                future = asyncio.run_coroutine_threadsafe(
+                    self._send_on_server_loop(message), loop
+                )
+                return await asyncio.wrap_future(future)
+
+        return await self._send_on_server_loop(message)
+
+    async def _send_on_server_loop(self, message: dict[str, Any]) -> int:
+        if self._send_lock:
+            async with self._send_lock:
+                return await self._send_on_server_loop_unlocked(message)
+
+        return await self._send_on_server_loop_unlocked(message)
+
+    async def _send_on_server_loop_unlocked(self, message: dict[str, Any]) -> int:
         text = json.dumps(message, ensure_ascii=False)
         username = message.get("Username")
 
@@ -191,6 +215,7 @@ class UeAvatarServer:
         loop = asyncio.new_event_loop()
         self._loop = loop
         asyncio.set_event_loop(loop)
+        self._send_lock = asyncio.Lock()
 
         try:
             self._server = loop.run_until_complete(
@@ -213,6 +238,7 @@ class UeAvatarServer:
             self._started.set()
         finally:
             self._server = None
+            self._send_lock = None
             if not loop.is_closed():
                 loop.close()
             self._loop = None

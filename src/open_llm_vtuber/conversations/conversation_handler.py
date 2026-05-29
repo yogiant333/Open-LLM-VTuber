@@ -16,6 +16,22 @@ from .types import GroupConversationState
 from prompts import prompt_loader
 
 
+def _observe_restarted_task_shutdown(task: asyncio.Task, client_uid: str) -> None:
+    """Log shutdown of a cancelled old turn without blocking the new user input."""
+
+    async def _wait_for_shutdown() -> None:
+        try:
+            await task
+        except asyncio.CancelledError:
+            logger.info(f"Previous conversation task for {client_uid} cancelled.")
+        except Exception as exc:
+            logger.error(
+                f"Previous conversation task for {client_uid} failed while restarting: {exc}"
+            )
+
+    asyncio.create_task(_wait_for_shutdown())
+
+
 async def handle_conversation_trigger(
     msg_type: str,
     data: dict,
@@ -102,14 +118,7 @@ async def handle_conversation_trigger(
                 f"Restarting active single conversation for {client_uid} with new user input"
             )
             existing_task.cancel()
-            try:
-                await existing_task
-            except asyncio.CancelledError:
-                logger.info(f"Previous conversation task for {client_uid} cancelled.")
-            except Exception as exc:
-                logger.error(
-                    f"Previous conversation task for {client_uid} failed while restarting: {exc}"
-                )
+            _observe_restarted_task_shutdown(existing_task, client_uid)
 
         current_conversation_tasks[client_uid] = asyncio.create_task(
             process_single_conversation(
