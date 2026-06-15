@@ -1,5 +1,6 @@
 """Constructs prompts for servers and tools, formats tool information for OpenAI API."""
 
+import asyncio
 from typing import Dict, Optional, List, Tuple, Any
 from loguru import logger
 
@@ -14,11 +15,35 @@ class ToolAdapter:
     def __init__(self, server_registery: Optional[ServerRegistry] = None) -> None:
         """Initialize with an ServerRegistry."""
         self.server_registery = server_registery or ServerRegistry()
+        self._cache_lock = asyncio.Lock()
+        self._server_tool_info_cache: Dict[
+            Tuple[str, ...], Tuple[Dict[str, Dict[str, str]], Dict[str, FormattedTool]]
+        ] = {}
+        self._tools_cache: Dict[
+            Tuple[str, ...], Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]]]
+        ] = {}
 
     async def get_server_and_tool_info(
         self, enabled_servers: List[str]
     ) -> Tuple[Dict[str, Dict[str, str]], Dict[str, FormattedTool]]:
         """Fetch tool information from specified enabled MCP servers."""
+        cache_key = tuple(enabled_servers)
+        async with self._cache_lock:
+            cached = self._server_tool_info_cache.get(cache_key)
+            if cached is not None:
+                logger.debug(
+                    f"MC: Reusing cached tool info for servers: {enabled_servers}"
+                )
+                return cached
+
+            result = await self._fetch_server_and_tool_info(enabled_servers)
+            self._server_tool_info_cache[cache_key] = result
+            return result
+
+    async def _fetch_server_and_tool_info(
+        self, enabled_servers: List[str]
+    ) -> Tuple[Dict[str, Dict[str, str]], Dict[str, FormattedTool]]:
+        """Fetch tool information from MCP servers without consulting the cache."""
         servers_info: Dict[str, Dict[str, str]] = {}
         formatted_tools: Dict[str, FormattedTool] = {}
 
@@ -220,6 +245,15 @@ class ToolAdapter:
         self, enabled_servers: List[str]
     ) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]]]:
         """Run the dynamic fetching and formatting process."""
+        cache_key = tuple(enabled_servers)
+        async with self._cache_lock:
+            cached = self._tools_cache.get(cache_key)
+            if cached is not None:
+                logger.info(
+                    f"MC: Reusing cached dynamic tool construction for servers: {enabled_servers}"
+                )
+                return cached
+
         logger.info(
             f"MC: Running dynamic tool construction for servers: {enabled_servers}"
         )
@@ -228,5 +262,8 @@ class ToolAdapter:
         )
         mcp_prompt_string = self.construct_mcp_prompt_string(servers_info)
         openai_tools, claude_tools = self.format_tools_for_api(formatted_tools_dict)
+        result = (mcp_prompt_string, openai_tools, claude_tools)
+        async with self._cache_lock:
+            self._tools_cache[cache_key] = result
         logger.info("MC: Dynamic tool construction complete.")
-        return mcp_prompt_string, openai_tools, claude_tools
+        return result
