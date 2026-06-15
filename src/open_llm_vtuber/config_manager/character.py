@@ -5,6 +5,7 @@ from .i18n import I18nMixin, Description
 from .asr import ASRConfig
 from .tts import TTSConfig
 from .vad import VADConfig
+from .kws import KWSConfig
 from .tts_preprocessor import TTSPreprocessorConfig
 
 from .agent import AgentConfig
@@ -24,6 +25,7 @@ class CharacterConfig(I18nMixin):
     asr_config: ASRConfig = Field(..., alias="asr_config")
     tts_config: TTSConfig = Field(..., alias="tts_config")
     vad_config: VADConfig = Field(..., alias="vad_config")
+    kws_config: KWSConfig = Field(default_factory=KWSConfig, alias="kws_config")
     tts_preprocessor_config: TTSPreprocessorConfig = Field(
         ..., alias="tts_preprocessor_config"
     )
@@ -56,6 +58,9 @@ class CharacterConfig(I18nMixin):
         ),
         "vad_config": Description(
             en="Configuration for Voice Activity Detection", zh="语音活动检测配置"
+        ),
+        "kws_config": Description(
+            en="Configuration for Keyword Spotting", zh="唤醒词检测配置"
         ),
         "tts_preprocessor_config": Description(
             en="Configuration for Text-to-Speech Preprocessor",

@@ -20,7 +20,7 @@
 - DeepSeek 通过 OpenAI-compatible LLM 适配器接入。
 - DeepSeek V4 语音对话需要在本地 `conf.yaml` 里保持 `thinking: disabled`，用于降低首句延迟。
 - `conf.yaml` 是本地配置并被忽略，可能包含 API key，不要强制加入 git。
-- 当前角色提示词是中文语音友好的“小明”风格：短、直接、口语化，适合 TTS 播报。
+- 当前角色提示词是中文语音友好的“小智”风格：短、直接、口语化，适合 TTS 播报。
 - LLM 输出必须可朗读。纯标点、只有省略号、空白或只有表情时，应兜底为一句短的可播报文本。
 - 单人会话的 `text-input` 支持重启式追加：同一 `client_uid` 已有未完成 `process_single_conversation` 时，新输入会取消旧任务并立即重启；已经写入 agent memory 的前序用户输入作为独立 `role=user` 消息保留，最终只让数字人生成一次回复。
 

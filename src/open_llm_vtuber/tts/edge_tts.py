@@ -14,8 +14,9 @@ sys.path.append(current_dir)
 
 
 class TTSEngine(TTSInterface):
-    def __init__(self, voice="en-US-AvaMultilingualNeural"):
+    def __init__(self, voice="en-US-AvaMultilingualNeural", proxy=None):
         self.voice = voice
+        self.proxy = proxy or os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
 
         self.temp_audio_file = "temp"
         self.file_extension = "mp3"
@@ -40,7 +41,7 @@ class TTSEngine(TTSInterface):
         file_name = self.generate_cache_file_name(file_name_no_ext, self.file_extension)
 
         try:
-            communicate = edge_tts.Communicate(text, self.voice)
+            communicate = edge_tts.Communicate(text, self.voice, proxy=self.proxy)
             communicate.save_sync(file_name)
         except Exception as e:
             logger.critical(f"\nError: edge-tts unable to generate audio: {e}")

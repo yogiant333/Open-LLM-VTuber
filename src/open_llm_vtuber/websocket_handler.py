@@ -15,6 +15,8 @@ from .chat_group import (
 )
 from .message_handler import message_handler
 from .ue_avatar_server import ue_avatar_server
+from .ue_avatar_protocol import send_wakeup_status
+from .kws.audio_session import AudioSession
 from .utils.stream_audio import prepare_audio_payload
 from .chat_history_manager import (
     create_new_history,
@@ -22,6 +24,7 @@ from .chat_history_manager import (
     delete_history,
     get_history_list,
 )
+from .config_manager.kws import KWSConfig
 from .config_manager.utils import scan_config_alts_directory, scan_bg_directory
 from .conversations.conversation_handler import (
     handle_conversation_trigger,
@@ -70,6 +73,8 @@ class WebSocketHandler:
         self.current_conversation_tasks: Dict[str, Optional[asyncio.Task]] = {}
         self.default_context_cache = default_context_cache
         self.received_data_buffers: Dict[str, np.ndarray] = {}
+        self.user_speech_active: Dict[str, bool] = {}
+        self.audio_sessions: Dict[str, AudioSession] = {}
         self._event_loop: asyncio.AbstractEventLoop | None = None
         ue_avatar_server.set_status_listener(self._publish_ue_avatar_status)
 
@@ -96,6 +101,9 @@ class WebSocketHandler:
             "switch-config": self._handle_config_switch,
             "fetch-backgrounds": self._handle_fetch_backgrounds,
             "audio-play-start": self._handle_audio_play_start,
+            "frontend-playback-complete": self._handle_frontend_playback_complete,
+            "kws-config-request": self._handle_kws_config_request,
+            "kws-config-update": self._handle_kws_config_update,
             "request-init-config": self._handle_init_config_request,
             "heartbeat": self._handle_heartbeat,
         }
@@ -161,6 +169,7 @@ class WebSocketHandler:
         self.client_connections[client_uid] = websocket
         self.client_contexts[client_uid] = session_service_context
         self.received_data_buffers[client_uid] = np.array([])
+        self.user_speech_active[client_uid] = False
 
         self.chat_group_manager.client_group_map[client_uid] = ""
         await self.send_group_update(websocket, client_uid)
@@ -184,6 +193,7 @@ class WebSocketHandler:
                     "conf_name": session_service_context.character_config.conf_name,
                     "conf_uid": session_service_context.character_config.conf_uid,
                     "client_uid": client_uid,
+                    "kws_config": self._public_kws_config(session_service_context),
                 }
             )
         )
@@ -213,6 +223,133 @@ class WebSocketHandler:
             except Exception as exc:
                 logger.warning(f"Failed to send UE avatar status to {uid}: {exc}")
 
+    @staticmethod
+    def _is_fast_audio_message(data: dict) -> bool:
+        return data.get("type") in {"raw-audio-data", "mic-audio-data"}
+
+    @staticmethod
+    def _public_kws_config(context: ServiceContext) -> dict:
+        kws_config = getattr(context.character_config, "kws_config", None)
+        if not kws_config:
+            return {"enabled": False}
+        sherpa_config = kws_config.sherpa_onnx_kws
+        return {
+            "enabled": bool(kws_config.enabled and context.kws_engine and context.vad_engine),
+            "requested_enabled": kws_config.enabled,
+            "model_ready": bool(context.kws_engine),
+            "vad_ready": bool(context.vad_engine),
+            "wake_words": kws_config.wake_words,
+            "sample_rate": kws_config.sample_rate,
+            "channels": kws_config.channels,
+            "audio_format": kws_config.audio_format,
+            "frame_ms": kws_config.frame_ms,
+            "pre_roll_ms": kws_config.pre_roll_ms,
+            "cooldown_seconds": kws_config.cooldown_seconds,
+            "listen_timeout_seconds": kws_config.listen_timeout_seconds,
+            "active_timeout_seconds": kws_config.active_timeout_seconds,
+            "keywords_score": sherpa_config.keywords_score,
+            "keywords_threshold": sherpa_config.keywords_threshold,
+        }
+
+    @staticmethod
+    def _build_runtime_kws_config(current_config: KWSConfig, data: dict) -> KWSConfig:
+        allowed_top_level = {
+            "enabled",
+            "wake_words",
+            "sample_rate",
+            "frame_ms",
+            "pre_roll_ms",
+            "cooldown_seconds",
+            "listen_timeout_seconds",
+            "active_timeout_seconds",
+        }
+        allowed_sherpa = {"keywords_score", "keywords_threshold"}
+
+        updates = {key: data[key] for key in allowed_top_level if key in data}
+        sherpa_updates = {key: data[key] for key in allowed_sherpa if key in data}
+        nested_sherpa = data.get("sherpa_onnx_kws")
+        if isinstance(nested_sherpa, dict):
+            sherpa_updates.update(
+                {key: nested_sherpa[key] for key in allowed_sherpa if key in nested_sherpa}
+            )
+
+        config_data = current_config.model_dump(by_alias=True)
+        config_data.update(updates)
+        config_data["sherpa_onnx_kws"].update(sherpa_updates)
+        new_config = KWSConfig.model_validate(config_data)
+
+        if new_config.channels != 1:
+            raise ValueError("KWS only supports mono audio: channels must be 1")
+        if new_config.sample_rate != 16000:
+            raise ValueError("KWS sample_rate must be 16000")
+        if new_config.audio_format != "pcm_f32le":
+            raise ValueError("KWS audio_format must be pcm_f32le")
+        if new_config.frame_ms not in {20, 40, 60, 80, 100}:
+            raise ValueError("KWS frame_ms must be one of 20, 40, 60, 80, 100")
+        if new_config.pre_roll_ms < 0 or new_config.pre_roll_ms > 3000:
+            raise ValueError("KWS pre_roll_ms must be between 0 and 3000")
+        if new_config.cooldown_seconds < 0 or new_config.cooldown_seconds > 30:
+            raise ValueError("KWS cooldown_seconds must be between 0 and 30")
+        if new_config.listen_timeout_seconds <= 0 or new_config.listen_timeout_seconds > 60:
+            raise ValueError("KWS listen_timeout_seconds must be between 0 and 60")
+        if new_config.active_timeout_seconds <= 0 or new_config.active_timeout_seconds > 600:
+            raise ValueError("KWS active_timeout_seconds must be between 0 and 600")
+        if new_config.sherpa_onnx_kws.keywords_score <= 0:
+            raise ValueError("KWS keywords_score must be greater than 0")
+        if new_config.sherpa_onnx_kws.keywords_threshold < 0:
+            raise ValueError("KWS keywords_threshold must be non-negative")
+        return new_config
+
+    async def _broadcast_kws_config_state(self) -> None:
+        for uid, websocket in list(self.client_connections.items()):
+            context = self.client_contexts.get(uid)
+            if not context:
+                continue
+            try:
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "kws-config-state",
+                            "success": True,
+                            "kws_config": self._public_kws_config(context),
+                        }
+                    )
+                )
+            except Exception as exc:
+                logger.warning(f"Failed to send KWS config state to {uid}: {exc}")
+
+    def _sync_runtime_kws_config(self, new_config: KWSConfig) -> None:
+        self.default_context_cache.init_kws(new_config)
+        shared_kws_engine = self.default_context_cache.kws_engine
+
+        for uid, context in list(self.client_contexts.items()):
+            context.character_config.kws_config = new_config
+            context.kws_engine = shared_kws_engine
+            if new_config.enabled and context.kws_engine and context.vad_engine:
+                self._ensure_audio_session(uid, context)
+            else:
+                self.audio_sessions.pop(uid, None)
+
+    def _ensure_audio_session(
+        self, client_uid: str, context: ServiceContext
+    ) -> None:
+        kws_config = getattr(context.character_config, "kws_config", None)
+        if not kws_config or not kws_config.enabled:
+            return
+        if not context.kws_engine:
+            logger.warning("KWS is enabled but no KWS engine is initialized.")
+            return
+        if not context.vad_engine:
+            logger.warning("KWS is enabled but VAD is disabled; audio session skipped.")
+            return
+
+        self.audio_sessions[client_uid] = AudioSession(
+            client_uid=client_uid,
+            config=kws_config,
+            kws_engine=context.kws_engine,
+            vad_engine=context.vad_engine,
+        )
+
     async def _init_service_context(
         self, send_text: Callable, client_uid: str
     ) -> ServiceContext:
@@ -230,6 +367,7 @@ class WebSocketHandler:
             asr_engine=self.default_context_cache.asr_engine,
             tts_engine=self.default_context_cache.tts_engine,
             vad_engine=self.default_context_cache.vad_engine,
+            kws_engine=self.default_context_cache.kws_engine,
             agent_engine=None,
             translate_engine=self.default_context_cache.translate_engine,
             mcp_server_registery=self.default_context_cache.mcp_server_registery,
@@ -237,6 +375,7 @@ class WebSocketHandler:
             send_text=send_text,
             client_uid=client_uid,
         )
+        self._ensure_audio_session(client_uid, session_service_context)
         return session_service_context
 
     async def handle_websocket_communication(
@@ -253,7 +392,8 @@ class WebSocketHandler:
             while True:
                 try:
                     data = await websocket.receive_json()
-                    message_handler.handle_message(client_uid, data)
+                    if not self._is_fast_audio_message(data):
+                        message_handler.handle_message(client_uid, data)
                     await self._route_message(websocket, client_uid, data)
                 except WebSocketDisconnect:
                     raise
@@ -296,6 +436,52 @@ class WebSocketHandler:
         else:
             if msg_type != "frontend-playback-complete":
                 logger.warning(f"Unknown message type: {msg_type}")
+
+    async def _handle_kws_config_request(
+        self, websocket: WebSocket, client_uid: str, data: dict
+    ) -> None:
+        context = self.client_contexts[client_uid]
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "kws-config-state",
+                    "success": True,
+                    "kws_config": self._public_kws_config(context),
+                }
+            )
+        )
+
+    async def _handle_kws_config_update(
+        self, websocket: WebSocket, client_uid: str, data: dict
+    ) -> None:
+        current_config = self.default_context_cache.character_config.kws_config
+        try:
+            new_config = self._build_runtime_kws_config(current_config, data)
+            self._sync_runtime_kws_config(new_config)
+        except Exception as exc:
+            logger.warning(f"KWS runtime config update failed: {exc}")
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "kws-config-state",
+                        "success": False,
+                        "message": str(exc),
+                        "kws_config": self._public_kws_config(
+                            self.client_contexts[client_uid]
+                        ),
+                    }
+                )
+            )
+            return
+
+        logger.info(
+            "KWS runtime config updated by {}: enabled={} frame_ms={} threshold={}",
+            client_uid,
+            new_config.enabled,
+            new_config.frame_ms,
+            new_config.sherpa_onnx_kws.keywords_threshold,
+        )
+        await self._broadcast_kws_config_state()
 
     async def _handle_group_operation(
         self, websocket: WebSocket, client_uid: str, data: dict
@@ -347,6 +533,8 @@ class WebSocketHandler:
         self.client_connections.pop(client_uid, None)
         self.client_contexts.pop(client_uid, None)
         self.received_data_buffers.pop(client_uid, None)
+        self.user_speech_active.pop(client_uid, None)
+        self.audio_sessions.pop(client_uid, None)
         if client_uid in self.current_conversation_tasks:
             task = self.current_conversation_tasks[client_uid]
             if task and not task.done():
@@ -365,6 +553,8 @@ class WebSocketHandler:
         self.client_connections.pop(client_uid, None)
         self.client_contexts.pop(client_uid, None)
         self.received_data_buffers.pop(client_uid, None)
+        self.user_speech_active.pop(client_uid, None)
+        self.audio_sessions.pop(client_uid, None)
         self.chat_group_manager.client_group_map.pop(client_uid, None)
 
         if client_uid in self.current_conversation_tasks:
@@ -537,14 +727,30 @@ class WebSocketHandler:
         """Handle incoming raw audio data for VAD processing"""
         context = self.client_contexts[client_uid]
         chunk = data.get("audio", [])
+        audio_session = self.audio_sessions.get(client_uid)
+        if chunk and audio_session:
+            await self._handle_kws_audio_frame(websocket, client_uid, data, audio_session)
+            return
+
         if chunk:
             for audio_bytes in context.vad_engine.detect_speech(chunk):
                 if audio_bytes == b"<|PAUSE|>":
+                    await self._send_user_speech_state(
+                        websocket,
+                        client_uid,
+                        True,
+                        "speech-start",
+                    )
                     await websocket.send_text(
                         json.dumps({"type": "control", "text": "interrupt"})
                     )
                 elif audio_bytes == b"<|RESUME|>":
-                    pass
+                    await self._send_user_speech_state(
+                        websocket,
+                        client_uid,
+                        False,
+                        "speech-end",
+                    )
                 elif len(audio_bytes) > 1024:
                     # Detected audio activity (voice)
                     self.received_data_buffers[client_uid] = np.append(
@@ -554,6 +760,92 @@ class WebSocketHandler:
                     await websocket.send_text(
                         json.dumps({"type": "control", "text": "mic-audio-end"})
                     )
+
+    async def _handle_kws_audio_frame(
+        self,
+        websocket: WebSocket,
+        client_uid: str,
+        data: WSMessage,
+        audio_session: AudioSession,
+    ) -> None:
+        samples = np.array(data.get("audio", []), dtype=np.float32)
+        for event in audio_session.accept_frame(samples):
+            if event.type == "wakeup":
+                payload = {
+                    "type": "ue-wakeup",
+                    "username": client_uid,
+                    "keyword": event.keyword,
+                    "confidence": event.confidence,
+                    "source": "client-ws",
+                }
+                await websocket.send_text(json.dumps(payload))
+                await websocket.send_text(
+                    json.dumps({"type": "control", "text": "wakeup-detected"})
+                )
+                await send_wakeup_status(
+                    event.keyword or "",
+                    username=client_uid,
+                    source="client-ws",
+                )
+            elif event.type == "speech-start":
+                await self._send_user_speech_state(
+                    websocket,
+                    client_uid,
+                    True,
+                    "speech-start",
+                )
+                await websocket.send_text(
+                    json.dumps({"type": "control", "text": "interrupt"})
+                )
+            elif event.type == "speech-end":
+                await self._send_user_speech_state(
+                    websocket,
+                    client_uid,
+                    False,
+                    "speech-end",
+                )
+            elif event.type == "utterance" and event.audio is not None:
+                audio_session.mark_processing()
+                self.received_data_buffers[client_uid] = event.audio
+                await self._handle_conversation_trigger(
+                    websocket,
+                    client_uid,
+                    {
+                        "type": "mic-audio-end",
+                        "metadata": {
+                            "wakeup": True,
+                            "wake_words": self.client_contexts[
+                                client_uid
+                            ].character_config.kws_config.wake_words,
+                        },
+                    },
+                )
+            elif event.type == "timeout":
+                await websocket.send_text(
+                    json.dumps({"type": "control", "text": "wakeup-timeout"})
+                )
+
+    async def _send_user_speech_state(
+        self,
+        websocket: WebSocket,
+        client_uid: str,
+        active: bool,
+        phase: str,
+    ) -> None:
+        """Notify clients when backend VAD has confirmed speech start/end."""
+        if self.user_speech_active.get(client_uid) == active:
+            return
+
+        self.user_speech_active[client_uid] = active
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "user-speech-state",
+                    "active": active,
+                    "phase": phase,
+                }
+            )
+        )
 
     async def _handle_conversation_trigger(
         self, websocket: WebSocket, client_uid: str, data: WSMessage
@@ -572,6 +864,12 @@ class WebSocketHandler:
             current_conversation_tasks=self.current_conversation_tasks,
             broadcast_to_group=self.broadcast_to_group,
         )
+        audio_session = self.audio_sessions.get(client_uid)
+        task = self.current_conversation_tasks.get(client_uid)
+        if audio_session and task:
+            task.add_done_callback(
+                lambda _task, session=audio_session: session.mark_awake()
+            )
 
     async def _handle_fetch_configs(
         self, websocket: WebSocket, client_uid: str, data: WSMessage
@@ -620,6 +918,13 @@ class WebSocketHandler:
                 await self.broadcast_to_group(
                     group_members, silent_payload, exclude_uid=client_uid
                 )
+
+    async def _handle_frontend_playback_complete(
+        self, websocket: WebSocket, client_uid: str, data: WSMessage
+    ) -> None:
+        audio_session = self.audio_sessions.get(client_uid)
+        if audio_session:
+            audio_session.mark_awake()
 
     async def _handle_group_info(
         self, websocket: WebSocket, client_uid: str, data: WSMessage

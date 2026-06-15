@@ -1,4 +1,3 @@
-import re
 from typing import Optional, Union, Any, List, Dict
 import numpy as np
 import json
@@ -224,6 +223,7 @@ async def process_user_input(
     asr_engine: ASRInterface,
     websocket_send: WebSocketSend,
     username: str = "User",
+    metadata: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Process user input, converting audio to text if needed"""
     if isinstance(user_input, np.ndarray):

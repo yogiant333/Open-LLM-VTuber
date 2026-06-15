@@ -9,6 +9,7 @@ from .live2d_model import Live2dModel
 from .asr.asr_interface import ASRInterface
 from .tts.tts_interface import TTSInterface
 from .vad.vad_interface import VADInterface
+from .kws.sherpa_onnx_kws import SherpaOnnxKWS
 from .agent.agents.agent_interface import AgentInterface
 from .translate.translate_interface import TranslateInterface
 
@@ -53,6 +54,7 @@ class ServiceContext:
         self.agent_engine: AgentInterface = None
         # translate_engine can be none if translation is disabled
         self.vad_engine: VADInterface | None = None
+        self.kws_engine: SherpaOnnxKWS | None = None
         self.translate_engine: TranslateInterface | None = None
 
         self.mcp_server_registery: ServerRegistry | None = None
@@ -86,6 +88,7 @@ class ServiceContext:
             f"    Agent Config: {json.dumps(self.character_config.agent_config.model_dump(), indent=6) if self.character_config.agent_config else 'None'}\n"
             f"  VAD Engine: {type(self.vad_engine).__name__ if self.vad_engine else 'Not Loaded'}\n"
             f"    Agent Config: {json.dumps(self.character_config.vad_config.model_dump(), indent=6) if self.character_config.vad_config else 'None'}\n"
+            f"  KWS Engine: {type(self.kws_engine).__name__ if self.kws_engine else 'Not Loaded'}\n"
             f"  System Prompt: {self.system_prompt or 'Not Set'}\n"
             f"  MCP Enabled: {'Yes' if self.mcp_client else 'No'}"
         )
@@ -207,6 +210,7 @@ class ServiceContext:
         asr_engine: ASRInterface,
         tts_engine: TTSInterface,
         vad_engine: VADInterface,
+        kws_engine: SherpaOnnxKWS | None,
         agent_engine: AgentInterface | None,
         translate_engine: TranslateInterface | None,
         mcp_server_registery: ServerRegistry | None = None,
@@ -233,6 +237,7 @@ class ServiceContext:
         self.asr_engine = asr_engine
         self.tts_engine = tts_engine
         self.vad_engine = vad_engine
+        self.kws_engine = kws_engine
         # Do not share the cached agent instance across clients. It owns
         # mutable memory and interrupt state, so sharing it links sessions.
         self.agent_engine = None
@@ -290,6 +295,9 @@ class ServiceContext:
 
         # init vad from character config
         self.init_vad(config.character_config.vad_config)
+
+        # init KWS from character config
+        self.init_kws(config.character_config.kws_config)
 
         # Initialize shared ToolAdapter if it doesn't exist yet
         if (
@@ -374,6 +382,25 @@ class ServiceContext:
             self.character_config.vad_config = vad_config
         else:
             logger.info("VAD already initialized with the same config.")
+
+    def init_kws(self, kws_config) -> None:
+        if not kws_config or not kws_config.enabled:
+            logger.info("KWS is disabled.")
+            self.kws_engine = None
+            if kws_config:
+                self.character_config.kws_config = kws_config
+            return
+
+        if self.character_config.kws_config == kws_config and self.kws_engine:
+            logger.info("KWS already initialized with the same config.")
+            return
+
+        logger.info(f"Initializing KWS: {kws_config.provider}")
+        if kws_config.provider != "sherpa_onnx_kws":
+            raise ValueError(f"Unsupported KWS provider: {kws_config.provider}")
+
+        self.kws_engine = SherpaOnnxKWS(kws_config)
+        self.character_config.kws_config = kws_config
 
     async def init_agent(self, agent_config: AgentConfig, persona_prompt: str) -> None:
         """Initialize or update the LLM engine based on agent configuration."""

@@ -15,6 +15,9 @@ from ..ue_avatar_protocol import send_audio_payload
 from .types import WebSocketSend
 
 
+_TTS_GENERATION_LOCK = asyncio.Lock()
+
+
 class TTSTaskManager:
     """Manages TTS tasks and ensures ordered delivery to frontend while allowing parallel TTS generation"""
 
@@ -187,10 +190,11 @@ class TTSTaskManager:
     async def _generate_audio(self, tts_engine: TTSInterface, text: str) -> str:
         """Generate audio file from text"""
         logger.debug(f"🏃Generating audio for '''{text}'''...")
-        return await tts_engine.async_generate_audio(
-            text=text,
-            file_name_no_ext=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}",
-        )
+        async with _TTS_GENERATION_LOCK:
+            return await tts_engine.async_generate_audio(
+                text=text,
+                file_name_no_ext=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}",
+            )
 
     def clear(self) -> None:
         """Clear all pending tasks and reset state"""

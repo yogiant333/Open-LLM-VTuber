@@ -29,6 +29,7 @@ UE 集成最终按 Fay 的协议方向实现：
 - `Data.Key=log`：思考中、清空状态等。
 - `Data.Key=text`：分段字幕。
 - `Data.Key=audio`：音频播放消息。
+- `Data.Key=suggestions`：推荐提问/追问选项，只用于 UI 按钮，不进入 TTS。
 
 音频消息同时包含：
 
@@ -36,6 +37,26 @@ UE 集成最终按 Fay 的协议方向实现：
 - `Data.Value`：Windows 本地路径，例如 `D:\AI\Open-LLM-VTuber\cache\ue_audio\xxx.wav`。
 
 实际验证中，UE 蓝图对音频播放依赖 Fay 风格的 `Value` 本地路径，所以不要移除它。
+
+推荐提问消息格式：
+
+```json
+{
+  "Topic": "human",
+  "Data": {
+    "Key": "suggestions",
+    "Value": [
+      "今日用电负荷如何？",
+      "电网运行是否稳定？",
+      "重点工程进展情况？"
+    ],
+    "Context": "initial"
+  },
+  "Username": "User"
+}
+```
+
+`Context=initial` 表示初始示例问题，`Context=follow_up` 表示一轮回答后的追问。后端在 `process_single_conversation()` 完整拿到 `input_text` 与 `full_response` 后生成追问并推给 UE；初始示例可通过 `POST /api/runtime/ue-suggestions` 主动生成并派发。
 
 ## Pixel Streaming
 
@@ -52,8 +73,8 @@ http://127.0.0.1:80
 后端：
 
 - `src/open_llm_vtuber/ue_avatar_server.py`：Fay 兼容 UE WebSocket 服务，监听 `10002`。
-- `src/open_llm_vtuber/ue_avatar_protocol.py`：发送 `question/log/text/audio`，缓存音频并生成 `Value`/`HttpValue`。
-- `src/open_llm_vtuber/routes.py`：运行时 TTS 配置、UE 音频缓存、UE 状态接口。
+- `src/open_llm_vtuber/ue_avatar_protocol.py`：发送 `question/log/text/audio/suggestions`，缓存音频并生成 `Value`/`HttpValue`。
+- `src/open_llm_vtuber/routes.py`：运行时 TTS 配置、UE 音频缓存、UE 状态接口；`POST /api/runtime/ue-suggestions` 生成初始示例问题并可派发给 UE。
 - `src/open_llm_vtuber/server.py`：启动 UE WebSocket 服务。
 - `run_server.py`：关闭时停止 UE WebSocket 服务。
 - `src/open_llm_vtuber/conversations/conversation_utils.py`：在对话开始、用户输入、对话结束时推 UE 消息。

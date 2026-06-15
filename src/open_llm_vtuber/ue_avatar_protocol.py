@@ -60,6 +60,25 @@ async def send_log(text: str, username: str = "User") -> None:
     )
 
 
+async def send_wakeup_status(
+    keyword: str,
+    username: str = "User",
+    source: str = "client-ws",
+) -> None:
+    await ue_avatar_server.send(
+        {
+            "Topic": "human",
+            "Data": {
+                "Key": "wakeup_status",
+                "Value": "wakeup_detected",
+                "Keyword": keyword,
+                "Source": source,
+            },
+            "Username": username,
+        }
+    )
+
+
 async def send_suggestions(
     suggestions: list[str],
     username: str = "User",
@@ -80,6 +99,7 @@ async def send_suggestions(
             "Username": username,
         }
     )
+
 
 async def send_text(text: str, is_end: bool = False, username: str = "User") -> None:
     normalized = text.strip()
