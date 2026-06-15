@@ -60,6 +60,27 @@ async def send_log(text: str, username: str = "User") -> None:
     )
 
 
+async def send_suggestions(
+    suggestions: list[str],
+    username: str = "User",
+    context: str = "follow_up",
+) -> None:
+    cleaned = [item.strip() for item in suggestions if item and item.strip()]
+    if not cleaned:
+        return
+
+    await ue_avatar_server.send(
+        {
+            "Topic": "human",
+            "Data": {
+                "Key": "suggestions",
+                "Value": cleaned[:3],
+                "Context": context,
+            },
+            "Username": username,
+        }
+    )
+
 async def send_text(text: str, is_end: bool = False, username: str = "User") -> None:
     normalized = text.strip()
     if not normalized and not is_end:
