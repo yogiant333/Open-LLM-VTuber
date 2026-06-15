@@ -46,7 +46,7 @@ async def handle_conversation_trigger(
     broadcast_to_group: Callable,
 ) -> None:
     """Handle triggers that start a conversation"""
-    metadata = None
+    metadata = data.get("metadata")
 
     if msg_type == "ai-speak-signal":
         try:

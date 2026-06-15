@@ -11,7 +11,7 @@ from websockets.legacy.server import Serve, WebSocketServerProtocol, serve
 class UeAvatarServer:
     """Fay-compatible WebSocket server for UE digital human clients."""
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 10002):
+    def __init__(self, host: str = "127.0.0.1", port: int = 10002):
         self.host = host
         self.port = port
         self._clients: dict[WebSocketServerProtocol, dict[str, Any]] = {}

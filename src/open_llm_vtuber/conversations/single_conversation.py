@@ -81,7 +81,11 @@ async def process_single_conversation(
                 )
         else:
             input_text = await process_user_input(
-                user_input, context.asr_engine, websocket_send, username=client_uid
+                user_input,
+                context.asr_engine,
+                websocket_send,
+                username=client_uid,
+                metadata=metadata,
             )
         input_ready_ms = (time.perf_counter_ns() - turn_started_ns) / 1_000_000
         logger.info(

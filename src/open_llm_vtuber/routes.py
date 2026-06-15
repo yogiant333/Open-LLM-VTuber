@@ -20,6 +20,8 @@ from .service_context import ServiceContext
 from .websocket_handler import WebSocketHandler
 from .proxy_handler import ProxyHandler
 from .ue_avatar_server import ue_avatar_server
+from .conversations.conversation_utils import generate_ui_suggestions
+from .ue_avatar_protocol import send_suggestions
 
 
 CONFIG_PATH = Path("conf.yaml")
@@ -156,6 +158,14 @@ class UeAudioCacheRequest(BaseModel):
 
 class UeAvatarMessageRequest(BaseModel):
     message: dict[str, Any]
+
+
+class UeSuggestionsRequest(BaseModel):
+    username: str = "User"
+    context: str = "initial"
+    user_text: str = ""
+    assistant_text: str = ""
+    dispatch_to_ue: bool = True
 
 
 def _read_conf_yaml() -> Any:
@@ -467,6 +477,35 @@ def init_webtool_routes(default_context_cache: ServiceContext) -> APIRouter:
                 "connected_clients": ue_avatar_server.client_count(username),
             }
         )
+
+    @router.post("/api/runtime/ue-suggestions")
+    async def generate_ue_suggestions(payload: UeSuggestionsRequest):
+        """Generate short suggested questions and optionally dispatch them to UE."""
+        try:
+            suggestions = await generate_ui_suggestions(
+                context=default_context_cache,
+                user_text=payload.user_text,
+                assistant_text=payload.assistant_text,
+                suggestion_context=payload.context,
+            )
+            if payload.dispatch_to_ue:
+                await send_suggestions(
+                    suggestions,
+                    username=payload.username,
+                    context=payload.context,
+                )
+            return JSONResponse(
+                {
+                    "suggestions": suggestions,
+                    "connected_clients": ue_avatar_server.client_count(payload.username),
+                }
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate UE suggestions: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to generate UE suggestions: {e}",
+            ) from e
 
     @router.get("/api/runtime/ue-avatar-status")
     async def get_ue_avatar_status():
