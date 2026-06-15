@@ -27,11 +27,13 @@ uv --version
 
 ## 2. 拉取源码
 
-当前可用分支：
+当前部署只需要使用主仓库分支：
 
 ```text
 https://github.com/yogiant333/Open-LLM-VTuber/tree/backend-only-windows-deploy
 ```
+
+不要直接 clone `backend-kws-mic-streaming`。它是前端子模块 `Open-LLM-VTuber-Web` 的分支，主仓库已经通过 `.gitmodules` 指向它。
 
 在客户电脑上执行：
 
@@ -50,6 +52,8 @@ git clone https://github.com/yogiant333/Open-LLM-VTuber.git
 ## 3. 初始化子模块
 
 后端启动时仍会检查前端子模块是否存在，所以源码部署建议初始化子模块，避免首次启动时自动拉取造成等待。
+
+执行下面命令后，Git 会自动从 `https://github.com/yogiant333/Open-LLM-VTuber-Web` 拉取前端子模块的 `backend-kws-mic-streaming` 分支对应提交；不需要手动 clone 前端仓库。
 
 ```powershell
 git submodule update --init --recursive
