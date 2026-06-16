@@ -99,9 +99,9 @@ class AsyncLLM(StatelessLLMInterface):
             logger.debug(f"Messages: {messages_with_system}")
 
             available_tools = tools if self.support_tools else NOT_GIVEN
-            extra_body = (
-                {"thinking": {"type": self.thinking}} if self.thinking else NOT_GIVEN
-            )
+            request_kwargs: dict[str, Any] = {}
+            if self.thinking:
+                request_kwargs["extra_body"] = {"thinking": {"type": self.thinking}}
 
             stream: AsyncStream[
                 ChatCompletionChunk
@@ -111,7 +111,7 @@ class AsyncLLM(StatelessLLMInterface):
                 stream=True,
                 temperature=self.temperature,
                 tools=available_tools,
-                extra_body=extra_body,
+                **request_kwargs,
             )
             logger.debug(
                 f"Tool Support: {self.support_tools}, Available tools: {available_tools}"
