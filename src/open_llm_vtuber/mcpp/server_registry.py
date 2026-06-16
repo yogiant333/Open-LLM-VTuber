@@ -2,6 +2,8 @@
 
 import shutil
 import json
+import os
+import re
 
 from pathlib import Path
 from typing import Dict, Optional, Union, Any
@@ -11,6 +13,7 @@ from .types import MCPServer
 from .utils.path import validate_file
 
 DEFAULT_CONFIG_PATH = "mcp_servers.json"
+ENV_VAR_PATTERN = re.compile(r"\$\{(\w+)\}")
 
 
 class ServerRegistry:
@@ -44,6 +47,39 @@ class ServerRegistry:
         """Check if a runtime is available in the system PATH."""
         founded = shutil.which(target)
         return True if founded else False
+
+    def _expand_env_value(self, value: str, server_name: str, key: str) -> str:
+        """Replace ${VAR} placeholders in MCP env values."""
+
+        def replacer(match: re.Match[str]) -> str:
+            env_var = match.group(1)
+            env_value = os.getenv(env_var)
+            if env_value is None:
+                logger.warning(
+                    "MCPSR: Environment variable '{}' is not set for server '{}' env '{}'.",
+                    env_var,
+                    server_name,
+                    key,
+                )
+                return ""
+            return env_value
+
+        return ENV_VAR_PATTERN.sub(replacer, value)
+
+    def _build_server_env(
+        self, server_name: str, configured_env: Optional[dict[str, str]]
+    ) -> Optional[dict[str, str]]:
+        """Merge configured MCP env with the parent process environment."""
+        if not configured_env:
+            return None
+
+        merged_env = dict(os.environ)
+        for key, value in configured_env.items():
+            if isinstance(value, str):
+                merged_env[key] = self._expand_env_value(value, server_name, key)
+            else:
+                merged_env[key] = str(value)
+        return merged_env
 
     def load_servers(self) -> None:
         """Load servers from the config file."""
@@ -84,7 +120,9 @@ class ServerRegistry:
                 name=server_name,
                 command=command,
                 args=server_details["args"],
-                env=server_details.get("env", None),
+                env=self._build_server_env(
+                    server_name, server_details.get("env", None)
+                ),
                 cwd=server_details.get("cwd", None),
                 timeout=server_details.get("timeout", None),
             )
