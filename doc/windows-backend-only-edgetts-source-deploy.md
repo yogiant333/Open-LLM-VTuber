@@ -73,27 +73,29 @@ uv sync
 .\.venv\Scripts\python.exe --version
 ```
 
-## 5. 配置环境变量和运行配置
+## 5. 配置 `.env` 和运行配置
 
 仓库已经包含一份可部署的 `conf.yaml`。不要把真实 API key 写进 `conf.yaml`，默认配置通过环境变量读取密钥。
 
-在当前 PowerShell 窗口临时设置：
+首次部署时复制 `.env` 示例：
 
 ```powershell
-$env:DEEPSEEK_API_KEY="客户自己的 DeepSeek API key"
-$env:EXA_API_KEY="客户自己的 Exa API key"
+Copy-Item .\.env.example .\.env
+notepad .\.env
 ```
 
-如需长期生效，用用户级环境变量：
+填写：
 
-```powershell
-[Environment]::SetEnvironmentVariable("DEEPSEEK_API_KEY", "客户自己的 DeepSeek API key", "User")
-[Environment]::SetEnvironmentVariable("EXA_API_KEY", "客户自己的 Exa API key", "User")
+```dotenv
+DEEPSEEK_API_KEY=客户自己的 DeepSeek API key
+EXA_API_KEY=客户自己的 Exa API key
 ```
 
-设置后重新打开 PowerShell。
+`.env` 已被 `.gitignore` 忽略，不要提交。后端启动时会自动加载项目根目录的 `.env`。
 
 `DEEPSEEK_API_KEY` 用于当前默认 LLM；`EXA_API_KEY` 用于 MCP 搜索服务 `exa-search`。如果客户不使用 MCP 搜索，可以从 `conf.yaml` 的 `mcp_enabled_servers` 中移除 `exa-search`。
+
+如果同时设置了系统环境变量，系统环境变量优先，`.env` 只补充未设置的值。
 
 需要调整运行参数时再编辑：
 

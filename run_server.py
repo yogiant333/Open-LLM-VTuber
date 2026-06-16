@@ -6,11 +6,14 @@ import subprocess
 from pathlib import Path
 import tomli
 import uvicorn
+from dotenv import load_dotenv
 from loguru import logger
 from upgrade_codes.upgrade_manager import UpgradeManager
 
 from src.open_llm_vtuber.server import WebSocketServer
 from src.open_llm_vtuber.config_manager import Config, read_yaml, validate_config
+
+load_dotenv(Path(__file__).parent / ".env", override=False)
 
 os.environ["HF_HOME"] = str(Path(__file__).parent / "models")
 os.environ["MODELSCOPE_CACHE"] = str(Path(__file__).parent / "models")
