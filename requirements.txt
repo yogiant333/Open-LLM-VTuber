@@ -1083,6 +1083,8 @@ shellingham==1.5.4
     # via typer
 sherpa-onnx==1.10.46
     # via open-llm-vtuber
+silero-vad==6.2.1
+    # via open-llm-vtuber
 six==1.17.0
     # via langdetect
 sniffio==1.3.1
