@@ -73,15 +73,29 @@ uv sync
 .\.venv\Scripts\python.exe --version
 ```
 
-## 5. 创建本地配置
+## 5. 配置环境变量和运行配置
 
-`conf.yaml` 是本地配置文件，可能包含 API key，不提交到 git。首次部署时从中文模板复制：
+仓库已经包含一份可部署的 `conf.yaml`。不要把真实 API key 写进 `conf.yaml`，默认配置通过环境变量读取密钥。
+
+在当前 PowerShell 窗口临时设置：
 
 ```powershell
-Copy-Item .\config_templates\conf.ZH.default.yaml .\conf.yaml
+$env:DEEPSEEK_API_KEY="客户自己的 DeepSeek API key"
+$env:EXA_API_KEY="客户自己的 Exa API key"
 ```
 
-然后编辑：
+如需长期生效，用用户级环境变量：
+
+```powershell
+[Environment]::SetEnvironmentVariable("DEEPSEEK_API_KEY", "客户自己的 DeepSeek API key", "User")
+[Environment]::SetEnvironmentVariable("EXA_API_KEY", "客户自己的 Exa API key", "User")
+```
+
+设置后重新打开 PowerShell。
+
+`DEEPSEEK_API_KEY` 用于当前默认 LLM；`EXA_API_KEY` 用于 MCP 搜索服务 `exa-search`。如果客户不使用 MCP 搜索，可以从 `conf.yaml` 的 `mcp_enabled_servers` 中移除 `exa-search`。
+
+需要调整运行参数时再编辑：
 
 ```powershell
 notepad .\conf.yaml
@@ -111,16 +125,16 @@ system_config:
 
 ### LLM 配置
 
-按实际使用的 LLM 填 API key 和模型。示例：
+默认 DeepSeek 配置从环境变量读取 API key：
 
 ```yaml
 deepseek_llm:
   base_url: 'https://api.deepseek.com'
-  llm_api_key: '<客户自己的 API key>'
+  llm_api_key: '${DEEPSEEK_API_KEY}'
   model: 'deepseek-v4-flash'
 ```
 
-不要把包含 API key 的 `conf.yaml` 上传到公开仓库。
+不要把真实 API key 写入配置文件或提交到公开仓库。
 
 ### EdgeTTS 男声配置
 
