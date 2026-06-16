@@ -541,7 +541,7 @@ character_config:
 
   # =================== Keyword Spotting ===================
   kws_config:
-    enabled: false
+    enabled: true
     provider: sherpa_onnx_kws
     wake_words:
       - 小智小智
