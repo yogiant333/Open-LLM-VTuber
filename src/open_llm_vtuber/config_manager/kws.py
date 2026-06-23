@@ -41,7 +41,7 @@ class KWSConfig(I18nMixin):
     pre_roll_ms: int = Field(600, alias="pre_roll_ms")
     cooldown_seconds: float = Field(2.0, alias="cooldown_seconds")
     listen_timeout_seconds: float = Field(10.0, alias="listen_timeout_seconds")
-    active_timeout_seconds: float = Field(120.0, alias="active_timeout_seconds")
+    active_timeout_seconds: float = Field(10.0, alias="active_timeout_seconds")
     sherpa_onnx_kws: SherpaOnnxKWSConfig = Field(
         default_factory=SherpaOnnxKWSConfig,
         alias="sherpa_onnx_kws",
@@ -53,7 +53,7 @@ class KWSConfig(I18nMixin):
         "sample_rate": Description(en="Audio sample rate", zh="音频采样率"),
         "frame_ms": Description(en="Audio frame duration in milliseconds", zh="音频帧长度"),
         "active_timeout_seconds": Description(
-            en="Seconds to keep listening after wakeup without another user utterance",
-            zh="唤醒后无用户语音时保持连续对话的秒数",
+            en="Seconds to keep listening after avatar playback completes without another user utterance",
+            zh="数字人播放完成后无用户语音时保持连续对话的秒数",
         ),
     }

@@ -95,6 +95,17 @@ async def process_single_conversation(
             "audio" if isinstance(user_input, np.ndarray) else "text",
             input_ready_ms,
         )
+        if not input_text or (isinstance(input_text, list) and not input_text):
+            logger.info(
+                "Conversation turn ignored because user input was rejected or empty: turn_id={}",
+                timing_context["turn_id"],
+            )
+            await finalize_conversation_turn(
+                tts_manager=tts_manager,
+                websocket_send=websocket_send,
+                client_uid=client_uid,
+            )
+            return ""
 
         # Create batch input
         batch_input = create_batch_input(

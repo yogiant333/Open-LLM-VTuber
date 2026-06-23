@@ -38,11 +38,38 @@ class SileroVADConfig(I18nMixin):
     }
 
 
+class UtteranceFilterConfig(I18nMixin):
+    """Configuration for post-VAD utterance energy filtering."""
+
+    enabled: bool = Field(default=True, alias="enabled")
+    min_rms_dbfs: float = Field(default=-42.0, alias="min_rms_dbfs")
+    min_peak_dbfs: float = Field(default=-28.0, alias="min_peak_dbfs")
+
+    DESCRIPTIONS: ClassVar[Dict[str, Description]] = {
+        "enabled": Description(
+            en="Whether to reject low-energy utterances after VAD",
+            zh="是否在 VAD 后丢弃低能量语音片段",
+        ),
+        "min_rms_dbfs": Description(
+            en="Minimum RMS level in dBFS for an utterance to enter ASR",
+            zh="允许进入 ASR 的最低整体 RMS 音量，单位 dBFS",
+        ),
+        "min_peak_dbfs": Description(
+            en="Minimum peak level in dBFS for an utterance to enter ASR",
+            zh="允许进入 ASR 的最低峰值音量，单位 dBFS",
+        ),
+    }
+
+
 class VADConfig(I18nMixin):
     """Configuration for Automatic Speech Recognition."""
 
     vad_model: Optional[Literal["silero_vad"]] = Field(None, alias="vad_model")
     silero_vad: Optional[SileroVADConfig] = Field(None, alias="silero_vad")
+    utterance_filter: UtteranceFilterConfig = Field(
+        default_factory=UtteranceFilterConfig,
+        alias="utterance_filter",
+    )
 
     DESCRIPTIONS: ClassVar[Dict[str, Description]] = {
         "vad_model": Description(
@@ -50,6 +77,10 @@ class VADConfig(I18nMixin):
         ),
         "silero_vad": Description(
             en="Configuration for Silero VAD", zh="Silero VAD 配置"
+        ),
+        "utterance_filter": Description(
+            en="Post-VAD utterance energy filter",
+            zh="VAD 后的语音片段能量过滤",
         ),
     }
 

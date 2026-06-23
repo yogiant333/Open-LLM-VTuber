@@ -1,7 +1,9 @@
 from typing import Optional, Union, Any, List, Dict
 import numpy as np
 import json
+import re
 import time
+import unicodedata
 from loguru import logger
 
 from ..message_handler import message_handler
@@ -34,6 +36,20 @@ FOLLOW_UP_SUGGESTION_FALLBACKS = [
     "需要怎么调度？",
     "和昨日相比如何？",
 ]
+
+
+def is_single_hanzi_transcript(text: str) -> bool:
+    """Return true when ASR text contains exactly one meaningful Han character."""
+    significant_chars = [
+        char
+        for char in text
+        if not char.isspace() and unicodedata.category(char)[0] not in {"P", "S"}
+    ]
+    if len(significant_chars) != 1:
+        return False
+
+    char = significant_chars[0]
+    return "\u4e00" <= char <= "\u9fff"
 
 
 # Convert class methods to standalone functions
@@ -245,6 +261,23 @@ async def process_user_input(
             sample_rate=asr_engine.SAMPLE_RATE,
             metadata=capture_metadata,
         )
+        if is_single_hanzi_transcript(input_text):
+            logger.info(
+                "Rejected single-Hanzi ASR transcript: client_uid={} text={}",
+                username,
+                input_text,
+            )
+            await websocket_send(
+                json.dumps(
+                    {
+                        "type": "user-input-transcription",
+                        "text": input_text,
+                        "rejected": True,
+                        "reason": "single_hanzi",
+                    }
+                )
+            )
+            return ""
         await send_question(input_text, username=username)
         await websocket_send(
             json.dumps({"type": "user-input-transcription", "text": input_text})

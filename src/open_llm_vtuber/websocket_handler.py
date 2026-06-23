@@ -32,6 +32,8 @@ from .conversations.conversation_handler import (
     handle_individual_interrupt,
 )
 
+PCM_FLOAT_FLOOR = 1e-7
+
 
 class MessageType(Enum):
     """Enum for WebSocket message types"""
@@ -284,8 +286,8 @@ class WebSocketHandler:
             raise ValueError("KWS sample_rate must be 16000")
         if new_config.audio_format != "pcm_f32le":
             raise ValueError("KWS audio_format must be pcm_f32le")
-        if new_config.frame_ms not in {20, 40, 60, 80, 100}:
-            raise ValueError("KWS frame_ms must be one of 20, 40, 60, 80, 100")
+        if new_config.frame_ms not in {20, 32, 40, 60, 80, 100}:
+            raise ValueError("KWS frame_ms must be one of 20, 32, 40, 60, 80, 100")
         if new_config.pre_roll_ms < 0 or new_config.pre_roll_ms > 3000:
             raise ValueError("KWS pre_roll_ms must be between 0 and 3000")
         if new_config.cooldown_seconds < 0 or new_config.cooldown_seconds > 30:
@@ -753,10 +755,21 @@ class WebSocketHandler:
                     )
                 elif len(audio_bytes) > 1024:
                     # Detected audio activity (voice)
+                    audio = (
+                        np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
+                        / 32768.0
+                    )
+                    if not self._is_valid_utterance_audio(audio, client_uid, "vad"):
+                        await self._send_user_speech_state(
+                            websocket,
+                            client_uid,
+                            False,
+                            "speech-rejected",
+                        )
+                        continue
                     self.received_data_buffers[client_uid] = np.append(
                         self.received_data_buffers[client_uid],
-                        np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
-                        / 32768.0,
+                        audio,
                     )
                     await websocket.send_text(
                         json.dumps({"type": "control", "text": "mic-audio-end"})
@@ -806,6 +819,14 @@ class WebSocketHandler:
                     "speech-end",
                 )
             elif event.type == "utterance" and event.audio is not None:
+                if not self._is_valid_utterance_audio(event.audio, client_uid, "kws"):
+                    await self._send_user_speech_state(
+                        websocket,
+                        client_uid,
+                        False,
+                        "speech-rejected",
+                    )
+                    continue
                 audio_session.mark_processing()
                 self.received_data_buffers[client_uid] = event.audio
                 await self._handle_conversation_trigger(
@@ -825,6 +846,39 @@ class WebSocketHandler:
                 await websocket.send_text(
                     json.dumps({"type": "control", "text": "wakeup-timeout"})
                 )
+
+    def _is_valid_utterance_audio(
+        self, audio: np.ndarray, client_uid: str, source: str
+    ) -> bool:
+        if audio.size == 0:
+            return False
+
+        peak = float(np.max(np.abs(audio)))
+        rms = float(np.sqrt(np.mean(np.square(audio))))
+        peak_dbfs = 20.0 * np.log10(max(peak, PCM_FLOAT_FLOOR))
+        rms_dbfs = 20.0 * np.log10(max(rms, PCM_FLOAT_FLOOR))
+        utterance_filter = (
+            self.client_contexts[client_uid]
+            .character_config.vad_config.utterance_filter
+        )
+        if not utterance_filter.enabled:
+            return True
+
+        accepted = (
+            rms_dbfs >= utterance_filter.min_rms_dbfs
+            and peak_dbfs >= utterance_filter.min_peak_dbfs
+        )
+        if not accepted:
+            logger.info(
+                "Rejected low-energy utterance: client_uid={} source={} rms_dbfs={:.1f} peak_dbfs={:.1f} thresholds=({:.1f}, {:.1f})",
+                client_uid,
+                source,
+                rms_dbfs,
+                peak_dbfs,
+                utterance_filter.min_rms_dbfs,
+                utterance_filter.min_peak_dbfs,
+            )
+        return accepted
 
     async def _send_user_speech_state(
         self,
@@ -869,7 +923,7 @@ class WebSocketHandler:
         task = self.current_conversation_tasks.get(client_uid)
         if audio_session and task:
             task.add_done_callback(
-                lambda _task, session=audio_session: session.mark_awake()
+                lambda _task, session=audio_session: session.mark_awake_after_response()
             )
 
     async def _handle_fetch_configs(
@@ -925,7 +979,7 @@ class WebSocketHandler:
     ) -> None:
         audio_session = self.audio_sessions.get(client_uid)
         if audio_session:
-            audio_session.mark_awake()
+            audio_session.mark_awake_after_response()
 
     async def _handle_group_info(
         self, websocket: WebSocket, client_uid: str, data: WSMessage

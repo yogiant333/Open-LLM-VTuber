@@ -44,6 +44,7 @@ from .tts import (
 from .vad import (
     VADConfig,
     SileroVADConfig,
+    UtteranceFilterConfig,
 )
 from .kws import KWSConfig, SherpaOnnxKWSConfig
 from .tts_preprocessor import TTSPreprocessorConfig, TranslatorConfig, DeepLXConfig
@@ -115,6 +116,7 @@ __all__ = [
     # VAD related classes
     "VADConfig",
     "SileroVADConfig",
+    "UtteranceFilterConfig",
     "KWSConfig",
     "SherpaOnnxKWSConfig",
     # TTS preprocessor related classes
