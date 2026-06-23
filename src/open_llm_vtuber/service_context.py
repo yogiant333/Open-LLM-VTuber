@@ -345,9 +345,11 @@ class ServiceContext:
     def init_asr(self, asr_config: ASRConfig) -> None:
         if not self.asr_engine or (self.character_config.asr_config != asr_config):
             logger.info(f"Initializing ASR: {asr_config.asr_model}")
+            provider_config = getattr(asr_config, asr_config.asr_model).model_dump()
+            provider_config["hotwords"] = asr_config.hotwords
             self.asr_engine = ASRFactory.get_asr_system(
                 asr_config.asr_model,
-                **getattr(asr_config, asr_config.asr_model).model_dump(),
+                **provider_config,
             )
             # saving config should be done after successful initialization
             self.character_config.asr_config = asr_config

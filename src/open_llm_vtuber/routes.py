@@ -9,7 +9,7 @@ from typing import Any
 from uuid import uuid4
 import numpy as np
 from datetime import datetime
-from fastapi import APIRouter, WebSocket, UploadFile, File, Response, HTTPException, Request
+from fastapi import APIRouter, WebSocket, UploadFile, File, Form, Response, HTTPException, Request
 from pydantic import BaseModel, Field
 from ruamel.yaml import YAML
 from starlette.responses import FileResponse, JSONResponse
@@ -22,6 +22,8 @@ from .proxy_handler import ProxyHandler
 from .ue_avatar_server import ue_avatar_server
 from .conversations.conversation_utils import generate_ui_suggestions
 from .ue_avatar_protocol import send_suggestions
+from .asr.benchmark import ASRBenchmarkManager, decode_wav_bytes
+from .asr.capture import save_asr_capture
 
 
 CONFIG_PATH = Path("conf.yaml")
@@ -70,6 +72,8 @@ TTS_EDITABLE_FIELDS: dict[str, set[str]] = {
         "prompt_text",
         "reference_wav_path",
         "cfg_value",
+        "temperature",
+        "max_generate_length",
         "inference_timesteps",
         "normalize",
         "denoise",
@@ -341,6 +345,7 @@ def init_webtool_routes(default_context_cache: ServiceContext) -> APIRouter:
     """
 
     router = APIRouter()
+    asr_benchmark = ASRBenchmarkManager(default_context_cache)
 
     @router.get("/web-tool")
     async def web_tool_redirect():
@@ -351,6 +356,22 @@ def init_webtool_routes(default_context_cache: ServiceContext) -> APIRouter:
     async def web_tool_redirect_alt():
         """Redirect /web_tool to /web_tool/index.html"""
         return Response(status_code=302, headers={"Location": "/web-tool/index.html"})
+
+    @router.get("/asr-benchmark")
+    async def asr_benchmark_redirect():
+        """Redirect /asr-benchmark to the ASR benchmark web tool."""
+        return Response(
+            status_code=302,
+            headers={"Location": "/web-tool/asr_benchmark/index.html"},
+        )
+
+    @router.get("/asr-benchmark/index.html")
+    async def asr_benchmark_index_redirect():
+        """Redirect /asr-benchmark/index.html to the mounted static file."""
+        return Response(
+            status_code=302,
+            headers={"Location": "/web-tool/asr_benchmark/index.html"},
+        )
 
     @router.get("/live2d-models/info")
     async def get_live2d_folder_info():
@@ -517,6 +538,92 @@ def init_webtool_routes(default_context_cache: ServiceContext) -> APIRouter:
             }
         )
 
+    @router.get("/api/asr-benchmark/providers")
+    async def get_asr_benchmark_providers():
+        """Return ASR providers that can be tested from the benchmark page."""
+        try:
+            return JSONResponse(asr_benchmark.provider_status())
+        except Exception as e:
+            logger.error(f"Failed to get ASR benchmark providers: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to get ASR benchmark providers: {e}",
+            ) from e
+
+    def parse_json_list(raw: str, field_name: str) -> list[str]:
+        try:
+            value = json.loads(raw or "[]")
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid {field_name}") from exc
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise HTTPException(status_code=400, detail=f"{field_name} must be a string list")
+        return [item.strip() for item in value if item.strip()]
+
+    @router.post("/api/asr-benchmark/transcribe")
+    async def transcribe_asr_benchmark(
+        file: UploadFile = File(...),
+        providers: str = Form("[]"),
+        hotwords: str = Form("[]"),
+        reference_text: str = Form(""),
+    ):
+        """Run the same uploaded WAV through multiple ASR providers."""
+        try:
+            audio = decode_wav_bytes(await file.read())
+            result = await asr_benchmark.transcribe_many(
+                provider_names=parse_json_list(providers, "providers"),
+                audio=audio,
+                hotwords=parse_json_list(hotwords, "hotwords"),
+                reference_text=reference_text,
+            )
+            return JSONResponse(result)
+        except HTTPException:
+            raise
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except Exception as e:
+            logger.error(f"Failed to run ASR benchmark: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to run ASR benchmark: {e}",
+            ) from e
+
+    @router.post("/api/asr-benchmark/transcribe/{provider}")
+    async def transcribe_single_asr_benchmark(
+        provider: str,
+        file: UploadFile = File(...),
+        hotwords: str = Form("[]"),
+        reference_text: str = Form(""),
+    ):
+        """Run the uploaded WAV through a single ASR provider."""
+        try:
+            audio = decode_wav_bytes(await file.read())
+            result = await asr_benchmark.transcribe_one(
+                provider=provider,
+                audio=audio,
+                hotwords=parse_json_list(hotwords, "hotwords"),
+                reference_text=reference_text,
+            )
+            return JSONResponse(
+                {
+                    "audio": {
+                        "duration_ms": round(audio.duration_ms, 3),
+                        "sample_rate": audio.sample_rate,
+                        "channels": audio.channels,
+                    },
+                    "results": [result],
+                }
+            )
+        except HTTPException:
+            raise
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except Exception as e:
+            logger.error(f"Failed to run ASR benchmark for {provider}: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to run ASR benchmark for {provider}: {e}",
+            ) from e
+
     @router.post("/asr")
     async def transcribe_audio(file: UploadFile = File(...)):
         """
@@ -554,8 +661,19 @@ def init_webtool_routes(default_context_cache: ServiceContext) -> APIRouter:
             if len(audio_array) == 0:
                 raise ValueError("Empty audio data")
 
+            started = time.perf_counter()
             text = await default_context_cache.asr_engine.async_transcribe_np(
                 audio_array
+            )
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            save_asr_capture(
+                audio=audio_array,
+                transcript=text,
+                provider=default_context_cache.character_config.asr_config.asr_model,
+                source="api-asr",
+                elapsed_ms=elapsed_ms,
+                sample_rate=default_context_cache.asr_engine.SAMPLE_RATE,
+                metadata={"filename": file.filename},
             )
             logger.info(f"Transcription result: {text}")
             return {"text": text}

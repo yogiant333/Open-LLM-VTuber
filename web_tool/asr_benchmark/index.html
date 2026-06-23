@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ASR 测试台</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>ASR 测试台</h1>
+          <p id="statusLine">正在连接后端...</p>
+        </div>
+        <div class="metrics">
+          <span id="audioMeta">无音频</span>
+          <span id="backendMeta">后端未连接</span>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <aside class="panel controls-panel">
+          <div class="section-head">
+            <h2>测试对象</h2>
+            <button id="refreshProviders" class="icon-button" title="刷新 ASR 列表">↻</button>
+          </div>
+          <div id="providerList" class="provider-list"></div>
+
+          <label class="field">
+            <span>热词</span>
+            <textarea id="hotwordsInput" spellcheck="false" placeholder="一行一个热词"></textarea>
+          </label>
+
+          <label class="field">
+            <span>参考文本</span>
+            <textarea id="referenceInput" spellcheck="false" placeholder="可选。填写后计算 CER/WER"></textarea>
+          </label>
+        </aside>
+
+        <section class="panel recorder-panel">
+          <div class="section-head">
+            <h2>录音</h2>
+            <label class="file-button">
+              上传 WAV
+              <input id="audioFileInput" type="file" accept="audio/*" />
+            </label>
+          </div>
+
+          <div class="recorder-surface">
+            <canvas id="waveform" width="900" height="180"></canvas>
+            <div class="recording-time" id="recordingTime">00:00.000</div>
+          </div>
+
+          <div class="button-row">
+            <button id="recordButton" class="primary-button">开始录音</button>
+            <button id="stopButton" disabled>停止</button>
+            <button id="playButton" disabled>回放</button>
+            <button id="runButton" disabled>开始评测</button>
+          </div>
+
+          <audio id="audioPlayer" controls></audio>
+        </section>
+      </section>
+
+      <section class="panel result-panel">
+        <div class="section-head">
+          <h2>结果</h2>
+          <button id="clearResults" class="icon-button" title="清空结果">×</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ASR</th>
+                <th>状态</th>
+                <th>识别文本</th>
+                <th>音频</th>
+                <th>耗时</th>
+                <th>RTF</th>
+                <th>热词</th>
+                <th>CER</th>
+                <th>WER</th>
+                <th>错误</th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody">
+              <tr>
+                <td colspan="10" class="empty">暂无结果</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="./main.js"></script>
+  </body>
+</html>

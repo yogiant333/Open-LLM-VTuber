@@ -32,7 +32,14 @@
 | 后端 | `uv run run_server.py` | `http://127.0.0.1:18080` |
 | 前端 Web | `cd frontend && npm run dev:web -- --host 127.0.0.1 --force` | `http://127.0.0.1:3000` |
 
-WSL 脚本入口是仓库根目录的 `start_wsl.sh`，它用 `tmux` 分别托管后端和前端。
+当前本机运行时，仓库根目录固定使用 Windows 目录在 WSL 中的挂载路径：
+
+```bash
+cd /mnt/c/AI/Open-LLM-VTuber
+./start_wsl.sh
+```
+
+WSL 脚本入口是仓库根目录的 `start_wsl.sh`，它用 `tmux` 分别托管后端和前端。不要从 `/home/yy/AI/Open-LLM-VTuber` 启动服务，避免运行代码和 Windows 工作区代码不同步。
 
 ## 2. 入口与生命周期
 

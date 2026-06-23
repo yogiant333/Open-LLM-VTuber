@@ -15,6 +15,8 @@ class TTSEngine(TTSInterface):
         prompt_text: str = "",
         reference_wav_path: str = "",
         cfg_value: float = 2.0,
+        temperature: float = 1.0,
+        max_generate_length: int = 1500,
         inference_timesteps: int = 5,
         normalize: bool = False,
         denoise: bool = False,
@@ -28,6 +30,8 @@ class TTSEngine(TTSInterface):
         self.prompt_text = prompt_text
         self.reference_wav_path = reference_wav_path
         self.cfg_value = cfg_value
+        self.temperature = temperature
+        self.max_generate_length = max_generate_length
         self.inference_timesteps = inference_timesteps
         self.normalize = normalize
         self.denoise = denoise
@@ -55,6 +59,8 @@ class TTSEngine(TTSInterface):
         payload = {
             "text": text,
             "cfg_value": self.cfg_value,
+            "temperature": self.temperature,
+            "max_generate_length": self.max_generate_length,
             "inference_timesteps": self.inference_timesteps,
             "normalize": self.normalize,
             "denoise": self.denoise,
