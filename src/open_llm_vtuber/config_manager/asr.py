@@ -181,6 +181,158 @@ class GroqWhisperASRConfig(I18nMixin):
     }
 
 
+class Qwen3ASRConfig(I18nMixin):
+    """Configuration for Qwen3-ASR."""
+
+    backend: Literal["transformers", "vllm"] = Field("transformers", alias="backend")
+    model_name: str = Field("Qwen/Qwen3-ASR-1.7B", alias="model_name")
+    device_map: str = Field("cuda:0", alias="device_map")
+    dtype: Literal["bfloat16", "float16"] = Field("bfloat16", alias="dtype")
+    language: Optional[str] = Field("Chinese", alias="language")
+    context: str = Field(
+        "请严格逐字转写音频中的原话，不要润色、不要改写、不要补全、不要总结。"
+        "像“喂喂喂”“嗯”“啊”“能听见吗”这类口语和重复词也必须按听到的内容保留。",
+        alias="context",
+    )
+    max_new_tokens: int = Field(256, alias="max_new_tokens")
+    max_inference_batch_size: int = Field(1, alias="max_inference_batch_size")
+    attn_implementation: Optional[str] = Field(None, alias="attn_implementation")
+    vllm_gpu_memory_utilization: float = Field(0.9, alias="vllm_gpu_memory_utilization")
+    vllm_tensor_parallel_size: int = Field(1, alias="vllm_tensor_parallel_size")
+    vllm_max_model_len: Optional[int] = Field(None, alias="vllm_max_model_len")
+    vllm_enforce_eager: bool = Field(False, alias="vllm_enforce_eager")
+
+    DESCRIPTIONS: ClassVar[Dict[str, Description]] = {
+        "backend": Description(
+            en="Qwen3-ASR backend: transformers or vLLM",
+            zh="Qwen3-ASR 后端：transformers 或 vLLM",
+        ),
+        "model_name": Description(
+            en="Qwen3-ASR model name or local model directory",
+            zh="Qwen3-ASR 模型名称或本地模型目录",
+        ),
+        "device_map": Description(
+            en="CUDA device map, for example cuda:0. CPU is not supported.",
+            zh="CUDA 设备，例如 cuda:0。不支持 CPU。",
+        ),
+        "dtype": Description(
+            en="GPU inference dtype, bfloat16 or float16",
+            zh="GPU 推理精度，bfloat16 或 float16",
+        ),
+        "language": Description(
+            en="Language hint, for example Chinese, English, or empty for auto",
+            zh="语言提示，例如 Chinese、English，留空表示自动检测",
+        ),
+        "context": Description(
+            en="System context used to guide literal transcription",
+            zh="用于指导逐字转写的系统上下文",
+        ),
+        "max_new_tokens": Description(
+            en="Maximum tokens to generate for each transcription",
+            zh="每次识别最多生成的 token 数",
+        ),
+        "max_inference_batch_size": Description(
+            en="Maximum inference batch size",
+            zh="最大推理批大小",
+        ),
+        "attn_implementation": Description(
+            en="Optional attention implementation, for example flash_attention_2",
+            zh="可选注意力实现，例如 flash_attention_2",
+        ),
+        "vllm_gpu_memory_utilization": Description(
+            en="vLLM GPU memory utilization ratio",
+            zh="vLLM GPU 显存使用比例",
+        ),
+        "vllm_tensor_parallel_size": Description(
+            en="vLLM tensor parallel size",
+            zh="vLLM 张量并行大小",
+        ),
+        "vllm_max_model_len": Description(
+            en="Optional vLLM max model length",
+            zh="可选 vLLM 最大模型长度",
+        ),
+        "vllm_enforce_eager": Description(
+            en="Force eager execution in vLLM. Leave false for CUDA graph speedups.",
+            zh="强制 vLLM 使用 eager 执行。保持 false 可使用 CUDA Graph 加速。",
+        ),
+    }
+
+    @model_validator(mode="after")
+    def check_gpu_only(cls, values: "Qwen3ASRConfig", info: ValidationInfo):
+        device_map = (values.device_map or "").lower()
+        if not device_map.startswith("cuda"):
+            raise ValueError("Qwen3-ASR must use a CUDA GPU device, for example cuda:0")
+        return values
+
+
+class Qwen3ASRGGUFConfig(I18nMixin):
+    """Configuration for Qwen3-ASR-GGUF Python runtime."""
+
+    working_dir: str = Field("Qwen3-ASR-GGUF", alias="working_dir")
+    model_dir: str = Field("Qwen3-ASR-GGUF/model", alias="model_dir")
+    language: Optional[str] = Field("Chinese", alias="language")
+    context: str = Field(
+        "请严格逐字转写音频中的原话，不要润色、不要改写、不要补全、不要总结。"
+        "像“喂喂喂”“嗯”“啊”“能听见吗”这类口语和重复词也必须按听到的内容保留。",
+        alias="context",
+    )
+    use_dml: bool = Field(True, alias="use_dml")
+    use_vulkan: bool = Field(True, alias="use_vulkan")
+    timestamp: bool = Field(False, alias="timestamp")
+    asr_encoder_frontend: str = Field(
+        "qwen3_asr_encoder_frontend.int4.onnx", alias="asr_encoder_frontend"
+    )
+    asr_encoder_backend: str = Field(
+        "qwen3_asr_encoder_backend.int4.onnx", alias="asr_encoder_backend"
+    )
+    asr_llm: str = Field("qwen3_asr_llm.q4_k.gguf", alias="asr_llm")
+    aligner_encoder_frontend: str = Field(
+        "qwen3_aligner_encoder_frontend.int4.onnx",
+        alias="aligner_encoder_frontend",
+    )
+    aligner_encoder_backend: str = Field(
+        "qwen3_aligner_encoder_backend.int4.onnx",
+        alias="aligner_encoder_backend",
+    )
+    aligner_llm: str = Field("qwen3_aligner_llm.q4_k.gguf", alias="aligner_llm")
+    n_ctx: int = Field(2048, alias="n_ctx")
+    chunk_size: float = Field(40.0, alias="chunk_size")
+    memory_num: int = Field(1, alias="memory_num")
+    temperature: float = Field(0.4, alias="temperature")
+
+    DESCRIPTIONS: ClassVar[Dict[str, Description]] = {
+        "working_dir": Description(
+            en="Qwen3-ASR-GGUF submodule directory",
+            zh="Qwen3-ASR-GGUF 子仓库目录",
+        ),
+        "model_dir": Description(
+            en="Directory containing GGUF/ONNX model files",
+            zh="GGUF/ONNX 模型文件目录",
+        ),
+        "language": Description(
+            en="Language hint, for example Chinese or English",
+            zh="语言提示，例如 Chinese 或 English",
+        ),
+        "context": Description(
+            en="Prompt/context passed to Qwen3-ASR-GGUF",
+            zh="传给 Qwen3-ASR-GGUF 的提示词/上下文",
+        ),
+        "use_dml": Description(en="Enable DirectML acceleration", zh="启用 DirectML 加速"),
+        "use_vulkan": Description(en="Enable Vulkan acceleration", zh="启用 Vulkan 加速"),
+        "timestamp": Description(en="Generate timestamp alignment", zh="生成时间戳对齐"),
+        "asr_encoder_frontend": Description(en="ASR encoder frontend filename", zh="ASR 编码器前段文件名"),
+        "asr_encoder_backend": Description(en="ASR encoder backend filename", zh="ASR 编码器后段文件名"),
+        "asr_llm": Description(en="ASR decoder GGUF filename", zh="ASR 解码器 GGUF 文件名"),
+        "aligner_encoder_frontend": Description(en="Aligner encoder frontend filename", zh="Aligner 编码器前段文件名"),
+        "aligner_encoder_backend": Description(en="Aligner encoder backend filename", zh="Aligner 编码器后段文件名"),
+        "aligner_llm": Description(en="Aligner decoder GGUF filename", zh="Aligner 解码器 GGUF 文件名"),
+        "n_ctx": Description(en="LLM context size", zh="LLM 上下文窗口大小"),
+        "chunk_size": Description(en="Chunk size in seconds", zh="分段识别时长（秒）"),
+        "memory_num": Description(en="Number of history chunks", zh="保留历史片段数量"),
+        "temperature": Description(en="Decode temperature", zh="解码温度"),
+    }
+
+
 class SherpaOnnxASRConfig(I18nMixin):
     """Configuration for Sherpa Onnx ASR."""
 
@@ -318,7 +470,10 @@ class ASRConfig(I18nMixin):
         "fun_asr",
         "groq_whisper_asr",
         "sherpa_onnx_asr",
+        "qwen3_asr",
+        "qwen3_asr_gguf",
     ] = Field(..., alias="asr_model")
+    hotwords: list[str] = Field(default_factory=list, alias="hotwords")
     azure_asr: Optional[AzureASRConfig] = Field(None, alias="azure_asr")
     faster_whisper: Optional[FasterWhisperConfig] = Field(None, alias="faster_whisper")
     whisper_cpp: Optional[WhisperCPPConfig] = Field(None, alias="whisper_cpp")
@@ -330,10 +485,18 @@ class ASRConfig(I18nMixin):
     sherpa_onnx_asr: Optional[SherpaOnnxASRConfig] = Field(
         None, alias="sherpa_onnx_asr"
     )
+    qwen3_asr: Optional[Qwen3ASRConfig] = Field(None, alias="qwen3_asr")
+    qwen3_asr_gguf: Optional[Qwen3ASRGGUFConfig] = Field(
+        None, alias="qwen3_asr_gguf"
+    )
 
     DESCRIPTIONS: ClassVar[Dict[str, Description]] = {
         "asr_model": Description(
             en="Speech-to-text model to use", zh="要使用的语音识别模型"
+        ),
+        "hotwords": Description(
+            en="Shared ASR hotwords or domain phrases to bias recognition",
+            zh="ASR 公共热词或领域短语，用于提高识别命中率",
         ),
         "azure_asr": Description(en="Configuration for Azure ASR", zh="Azure ASR 配置"),
         "faster_whisper": Description(
@@ -349,6 +512,11 @@ class ASRConfig(I18nMixin):
         ),
         "sherpa_onnx_asr": Description(
             en="Configuration for Sherpa Onnx ASR", zh="Sherpa Onnx ASR 配置"
+        ),
+        "qwen3_asr": Description(en="Configuration for Qwen3-ASR", zh="Qwen3-ASR 配置"),
+        "qwen3_asr_gguf": Description(
+            en="Configuration for Qwen3-ASR-GGUF",
+            zh="Qwen3-ASR-GGUF 配置",
         ),
     }
 
@@ -371,5 +539,9 @@ class ASRConfig(I18nMixin):
             values.groq_whisper_asr.model_validate(values.groq_whisper_asr.model_dump())
         elif asr_model == "SherpaOnnxASR" and values.sherpa_onnx_asr is not None:
             values.sherpa_onnx_asr.model_validate(values.sherpa_onnx_asr.model_dump())
+        elif asr_model == "qwen3_asr" and values.qwen3_asr is not None:
+            values.qwen3_asr.model_validate(values.qwen3_asr.model_dump())
+        elif asr_model == "qwen3_asr_gguf" and values.qwen3_asr_gguf is not None:
+            values.qwen3_asr_gguf.model_validate(values.qwen3_asr_gguf.model_dump())
 
         return values

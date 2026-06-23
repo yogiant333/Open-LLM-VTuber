@@ -2,6 +2,27 @@ from typing import Type
 from .asr_interface import ASRInterface
 
 
+def _normalize_hotwords(hotwords: list[str] | None) -> list[str]:
+    return [word.strip() for word in hotwords or [] if word and word.strip()]
+
+
+def _merge_prompt_with_hotwords(prompt: str | None, hotwords: list[str] | None) -> str | None:
+    words = _normalize_hotwords(hotwords)
+    if not words:
+        return prompt
+
+    hotwords_prompt = "识别时请优先保留这些专有名词和领域词，不要改写：" + "、".join(words) + "。"
+    if prompt:
+        return f"{prompt}\n{hotwords_prompt}"
+    return hotwords_prompt
+
+
+def _without_common_options(kwargs: dict) -> dict:
+    cleaned = dict(kwargs)
+    cleaned.pop("hotwords", None)
+    return cleaned
+
+
 class ASRFactory:
     @staticmethod
     def get_asr_system(system_name: str, **kwargs) -> Type[ASRInterface]:
@@ -14,16 +35,26 @@ class ASRFactory:
                 language=kwargs.get("language"),
                 device=kwargs.get("device"),
                 compute_type=kwargs.get("compute_type"),
-                prompt=kwargs.get("prompt", None),
+                prompt=_merge_prompt_with_hotwords(
+                    kwargs.get("prompt", None), kwargs.get("hotwords")
+                ),
             )
         elif system_name == "whisper_cpp":
             from .whisper_cpp_asr import VoiceRecognition as WhisperCPPASR
 
-            return WhisperCPPASR(**kwargs)
+            provider_kwargs = _without_common_options(kwargs)
+            provider_kwargs["prompt"] = _merge_prompt_with_hotwords(
+                provider_kwargs.get("prompt"), kwargs.get("hotwords")
+            )
+            return WhisperCPPASR(**provider_kwargs)
         elif system_name == "whisper":
             from .openai_whisper_asr import VoiceRecognition as WhisperASR
 
-            return WhisperASR(**kwargs)
+            provider_kwargs = _without_common_options(kwargs)
+            provider_kwargs["prompt"] = _merge_prompt_with_hotwords(
+                provider_kwargs.get("prompt"), kwargs.get("hotwords")
+            )
+            return WhisperASR(**provider_kwargs)
         elif system_name == "fun_asr":
             from .fun_asr import VoiceRecognition as FunASR
 
@@ -57,6 +88,14 @@ class ASRFactory:
         elif system_name == "sherpa_onnx_asr":
             from .sherpa_onnx_asr import VoiceRecognition as SherpaOnnxASR
 
-            return SherpaOnnxASR(**kwargs)
+            return SherpaOnnxASR(**_without_common_options(kwargs))
+        elif system_name == "qwen3_asr":
+            from .qwen3_asr import VoiceRecognition as Qwen3ASR
+
+            return Qwen3ASR(**kwargs)
+        elif system_name == "qwen3_asr_gguf":
+            from .qwen3_asr_gguf import VoiceRecognition as Qwen3ASRGGUF
+
+            return Qwen3ASRGGUF(**kwargs)
         else:
             raise ValueError(f"Unknown ASR system: {system_name}")

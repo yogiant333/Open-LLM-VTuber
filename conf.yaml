@@ -54,7 +54,10 @@ character_config:
     - 每次回复都必须是可朗读、可 TTS 播报的自然语言句子。
     - 禁止只回复省略号、纯标点、空白、表情、Markdown 符号、代码符号、控制标签或任何不可播报内容。
     - 如果用户输入很短、无意义、像语音误识别，或你没有听清，就直接说：我没听清，请再说一遍。
-    - 禁止输出任何方括号情绪或动作标签，例如 [joy]、[sadness]、[neutral]、[surprise]。
+    - 只输出要让用户看到和听到的自然中文，不要发送表情、动作、姿态、舞台指令或控制标记。
+    - 禁止输出任何方括号标签，例如 [joy]、[sadness]、[neutral]、[surprise]、[wave]、[nod]。
+    - 禁止输出任何尖括号标签，例如 <think>、<action>、<motion>。
+    - 禁止输出任何括号动作描述，例如（点头）、（微笑）、（挥手）。
     - 如果想表达情绪，只用自然中文说出来，不要用标签、代码或符号。
 
     当用户正在和你语音互动时：
@@ -223,8 +226,20 @@ character_config:
 
   # === 自动语音识别 ===
   asr_config:
-    # 语音转文本模型选项：'faster_whisper', 'whisper_cpp', 'whisper', 'azure_asr', 'fun_asr', 'groq_whisper_asr', 'sherpa_onnx_asr'
-    asr_model: 'sherpa_onnx_asr' # 使用的语音识别模型
+    # 语音转文本模型选项：'faster_whisper', 'whisper_cpp', 'whisper', 'azure_asr', 'fun_asr', 'groq_whisper_asr', 'sherpa_onnx_asr', 'qwen3_asr', 'qwen3_asr_gguf'
+    asr_model: 'qwen3_asr_gguf' # 使用的语音识别模型
+    hotwords: # ASR 公共热词；会按当前 ASR 自动映射到 context、prompt 或原生热词能力
+      - '小智'
+      - '孟昭泰'
+      - '迎峰度夏'
+      - '售电量'
+      - '用电量'
+      - '全省负荷'
+      - '供电服务'
+      - '台区'
+      - '国网河南电力'
+      - '智慧数字人'
+      - '一体机'
 
     azure_asr:
       api_key: 'azure_api_key' # Azure API 密钥
@@ -319,9 +334,45 @@ character_config:
       model: 'whisper-large-v3-turbo' # 或者 'whisper-large-v3'
       lang: '' # 留空表示自动
 
+    # Qwen3-ASR 1.7B GPU 识别。必须安装 qwen-asr，并且必须有可用 CUDA GPU。
+    qwen3_asr:
+      backend: 'vllm' # 可选：transformers、vllm；vLLM 仅建议在 WSL/Linux 中使用
+      model_name: 'Qwen/Qwen3-ASR-0.6B' # 也可以改成本地模型目录，例如 C:\AI\models\Qwen3-ASR-0.6B
+      device_map: 'cuda:0' # 只支持 GPU，不支持 cpu
+      dtype: 'bfloat16' # 可选：bfloat16、float16
+      language: 'Chinese' # 中文展厅场景固定中文；留空可自动检测
+      context: '请严格逐字转写音频中的原话，不要润色、不要改写、不要补全、不要总结。像“喂喂喂”“嗯”“啊”“能听见吗”这类口语和重复词也必须按听到的内容保留。'
+      max_new_tokens: 128
+      max_inference_batch_size: 1
+      attn_implementation:
+      vllm_gpu_memory_utilization: 0.25
+      vllm_tensor_parallel_size: 1
+      vllm_max_model_len: 1024
+      vllm_enforce_eager: false
+
+    # Qwen3-ASR-GGUF Windows Python 接口识别。代码通过子仓库引用，模型文件本地放在 Qwen3-ASR-GGUF\model。
+    qwen3_asr_gguf:
+      working_dir: 'Qwen3-ASR-GGUF'
+      model_dir: 'Qwen3-ASR-GGUF\model'
+      language: 'Chinese'
+      context: '请严格逐字转写音频中的原话，不要润色、不要改写、不要补全、不要总结。像“喂喂喂”“嗯”“啊”“能听见吗”这类口语和重复词也必须按听到的内容保留。'
+      use_dml: true
+      use_vulkan: true
+      timestamp: false # 实时对话只需要文本，关闭 ForceAligner 时间戳以降低延迟；做字幕导出时再打开
+      asr_encoder_frontend: 'qwen3_asr_encoder_frontend.fp16.onnx'
+      asr_encoder_backend: 'qwen3_asr_encoder_backend.fp16.onnx'
+      asr_llm: 'qwen3_asr_llm.q5_k.gguf'
+      aligner_encoder_frontend: 'qwen3_aligner_encoder_frontend.int4.onnx'
+      aligner_encoder_backend: 'qwen3_aligner_encoder_backend.int4.onnx'
+      aligner_llm: 'qwen3_aligner_llm.q4_k.gguf'
+      n_ctx: 2048
+      chunk_size: 40.0
+      memory_num: 1
+      temperature: 0.4
+
   # =================== 文本转语音 ===================
   tts_config:
-    tts_model: 'edge_tts' # 使用的文本转语音模型
+    tts_model: 'voxcpm2_tts' # 使用的文本转语音模型
     # 文本转语音模型选项：
     #   'azure_tts', 'pyttsx3_tts', 'edge_tts', 'bark_tts',
     #   'cosyvoice_tts', 'cosyvoice2_tts', 'cosyvoice3_tts', 'voxcpm2_tts', 'melo_tts', 'coqui_tts', 'piper_tts',
@@ -405,12 +456,14 @@ character_config:
       timeout: 180 # 请求超时时间（秒）
 
     voxcpm2_tts: # VoxCPM2 NanoVLLM 连接到 Fay 兼容 HTTP wrapper
-      base_url: 'http://127.0.0.1:50005' # VoxCPM2 NanoVLLM 服务地址
+      base_url: 'http://127.0.0.1:50005' # VoxCPM2 NanoVLLM 服务地址；Windows 后端访问 Windows TTS
       control: '' # 音色描述；若使用 prompt_wav_path + prompt_text 固定音色，建议留空
       prompt_wav_path: 'C:\AI\Open-LLM-VTuber\assets\voice_prompts\p1_prompt.wav' # Ultimate Clone 提示音频
       prompt_text: '各位领导专家好，下面汇报面向电网智能化作业的通感算一体化关键技术研究项目，项目由国网河南电力牵头、中国电科院、智研院、信产集团以及福建电力配合。' # prompt_wav_path 对应文本
       reference_wav_path: '' # zero-shot 参考音频，可留空
       cfg_value: 2.0 # CFG 引导值
+      temperature: 1.0 # 采样温度
+      max_generate_length: 2000 # 生成长度上限
       inference_timesteps: 5 # 实时对话优先使用 5 步
       normalize: false # 是否归一化
       denoise: false # NanoVLLM wrapper 会忽略该参数
@@ -536,7 +589,7 @@ character_config:
       prob_threshold: 0.4 # 语音活动检测的概率阈值
       db_threshold: 60 # 语音活动检测的分贝阈值
       required_hits: 3 # 连续命中次数以确认语音
-      required_misses: 24 # 连续未命中次数以确认静音
+      required_misses: 24 # 连续未命中次数以确认静音，24 * 32ms ≈ 0.8s
       smoothing_window: 5 # 语音活动检测的平滑窗口大小
 
   # =================== Keyword Spotting ===================

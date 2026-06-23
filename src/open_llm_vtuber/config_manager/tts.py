@@ -276,6 +276,8 @@ class VoxCPM2TTSConfig(I18nMixin):
     prompt_text: str = Field("", alias="prompt_text")
     reference_wav_path: str = Field("", alias="reference_wav_path")
     cfg_value: float = Field(2.0, alias="cfg_value")
+    temperature: float = Field(1.0, alias="temperature")
+    max_generate_length: int = Field(1500, alias="max_generate_length")
     inference_timesteps: int = Field(5, alias="inference_timesteps")
     normalize: bool = Field(False, alias="normalize")
     denoise: bool = Field(False, alias="denoise")
@@ -293,6 +295,8 @@ class VoxCPM2TTSConfig(I18nMixin):
         "prompt_text": Description(en="Prompt text paired with prompt WAV", zh="提示音频对应文本"),
         "reference_wav_path": Description(en="Reference WAV file path", zh="参考音频 WAV 路径"),
         "cfg_value": Description(en="Classifier-free guidance value", zh="CFG 引导值"),
+        "temperature": Description(en="Sampling temperature", zh="采样温度"),
+        "max_generate_length": Description(en="Maximum generated token length", zh="最大生成长度"),
         "inference_timesteps": Description(en="Inference timesteps", zh="推理步数"),
         "normalize": Description(en="Normalize generated audio", zh="归一化生成音频"),
         "denoise": Description(en="Denoise generated audio", zh="降噪生成音频"),

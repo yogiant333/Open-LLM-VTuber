@@ -202,6 +202,7 @@ async def process_group_input(
         initiator_context.asr_engine,
         initiator_ws_send,
         username=initiator_client_uid,
+        asr_model=initiator_context.character_config.asr_config.asr_model,
     )
     await broadcast_transcription(
         broadcast_func, group_members, input_text, initiator_client_uid

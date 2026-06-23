@@ -1,180 +1,170 @@
 # 本地部署与运行说明
 
-本文档记录当前这份本地 Open-LLM-VTuber 项目的部署和运行方式。
+本文档记录当前本机 Open-LLM-VTuber 的实际运行方式。
 
-## 当前路径
+## 当前代码目录
 
-项目目录：
-
-```text
-/mnt/d/AI/Open-LLM-VTuber
-```
-
-Windows 对应目录通常是：
+唯一代码目录使用 Windows 路径：
 
 ```text
-D:\AI\Open-LLM-VTuber
+C:\AI\Open-LLM-VTuber
 ```
 
-主配置文件：
-
-```text
-/mnt/d/AI/Open-LLM-VTuber/conf.yaml
-```
-
-## 双击运行
-
-在 Windows 文件管理器中双击根目录脚本：
-
-```text
-start_open_llm_vtuber.bat
-```
-
-脚本会执行：
-
-1. 检查 `http://localhost:12393` 是否已经运行。
-2. 如果已经运行，直接打开浏览器。
-3. 如果没有运行，通过 WSL 进入项目目录。
-4. 执行 `uv run run_server.py` 启动服务。
-5. 延迟打开浏览器访问 `http://localhost:12393`。
-
-使用时保持脚本窗口打开。关闭窗口会停止服务。
-
-## 手动运行
-
-如果不用双击脚本，可以在 WSL 终端执行：
+WSL 中访问同一份代码时使用：
 
 ```bash
-cd /mnt/d/AI/Open-LLM-VTuber
-uv run run_server.py
+/mnt/c/AI/Open-LLM-VTuber
 ```
 
-然后浏览器打开：
+不要再把 `/home/yy/AI/Open-LLM-VTuber` 当作运行代码目录，否则 Windows 和 WSL 会变成两份代码，容易出现改了 Windows 文件但服务仍在跑旧代码的问题。
 
-```text
-http://localhost:12393
+## 当前运行环境
+
+- 代码：`/mnt/c/AI/Open-LLM-VTuber`
+- Python 环境：WSL conda 环境 `open-llm-vtuber-py312`
+- 后端：`http://127.0.0.1:18080/`
+- Web 前端：`http://127.0.0.1:3000/`
+- UE WebSocket：`ws://127.0.0.1:10002`
+- 后端 tmux：`open-llm-vtuber`
+- 前端 tmux：`open-llm-vtuber-frontend`
+
+## 启动服务
+
+在 PowerShell 中启动：
+
+```powershell
+wsl.exe -d Ubuntu -- bash -lc "cd /mnt/c/AI/Open-LLM-VTuber && ./start_wsl.sh"
 ```
 
-## 首次部署步骤
-
-当前环境已经完成过部署。重新部署时可以按下面步骤执行：
+在 WSL 终端中启动：
 
 ```bash
-cd /mnt/d/AI/Open-LLM-VTuber
-git submodule update --init --recursive
-uv sync
-uv run run_server.py
+cd /mnt/c/AI/Open-LLM-VTuber
+./start_wsl.sh
 ```
 
-首次启动时，项目可能会下载语音识别模型到 `models/`，耗时取决于网络和磁盘速度。
+`start_wsl.sh` 会：
 
-## 当前 LLM 配置
+1. 加载项目根目录 `.env`。
+2. 激活 WSL conda 环境 `open-llm-vtuber-py312`。
+3. 用 tmux 启动后端 `python run_server.py`。
+4. 用 tmux 启动前端 `npm run dev:web -- --host 127.0.0.1 --force`。
+5. 等待 `18080` 和 `3000` ready。
 
-当前使用 DeepSeek：
-
-```yaml
-character_config:
-  agent_config:
-    agent_settings:
-      basic_memory_agent:
-        llm_provider: 'deepseek_llm'
-```
-
-DeepSeek 参数在 `conf.yaml` 的 `deepseek_llm` 段：
-
-```yaml
-deepseek_llm:
-  base_url: 'https://api.deepseek.com'
-  llm_api_key: '<写在本地 conf.yaml 中>'
-  model: 'deepseek-v4-flash'
-  temperature: 0.7
-```
-
-不要把包含 API key 的 `conf.yaml` 上传到公开仓库。
-
-## 当前 MCP 配置
-
-MCP 已启用：
-
-```yaml
-use_mcpp: True
-mcp_enabled_servers: ["time", "ddg-search"]
-```
-
-MCP 服务定义在：
-
-```text
-mcp_servers.json
-```
-
-当前包含：
-
-- `time`
-- `ddg-search`
-
-修改 MCP 配置后需要重启服务。
-
-## 角色与数字人切换
-
-前端的角色预设来自：
-
-```text
-characters/*.yaml
-```
-
-每个角色可以通过 `live2d_model_name` 指定界面显示的 Live2D 形象。
-
-当前已配置：
-
-- `characters/zh_米粒.yaml` 使用 `mao_pro`
-- `characters/zh_翻译腔.yaml` 使用 `shizuku`
-
-Live2D 模型注册表：
-
-```text
-model_dict.json
-```
-
-当前已注册：
-
-- `mao_pro`
-- `shizuku`
-
-在网页中进入设置，找到“角色预设 / Character Preset”，即可切换角色。切换 `翻译腔-神经大人` 时会使用 `shizuku` 形象。
-
-## 添加新的 Live2D 模型
-
-1. 将 Live2D 模型目录放入：
-
-```text
-live2d-models/
-```
-
-2. 在 `model_dict.json` 中新增模型条目，`name` 要唯一。
-
-3. 在某个 `characters/*.yaml` 中设置：
-
-```yaml
-character_config:
-  live2d_model_name: '<model_dict.json 中的 name>'
-```
-
-4. 重启服务。
-
-## 常见问题
-
-端口被占用：
+## 停止服务
 
 ```bash
-ps -ef | rg 'run_server.py|uv run run_server'
+tmux kill-session -t open-llm-vtuber
+tmux kill-session -t open-llm-vtuber-frontend
 ```
 
-停止旧服务：
+如果需要清理残留 ASR vLLM 进程：
 
 ```bash
-kill <PID>
+pkill -f "VLLM::EngineCore|run_server.py"
 ```
 
-如果页面能打开但麦克风不可用，请使用 `localhost` 访问。远程设备访问麦克风通常需要 HTTPS。
+## 查看日志
 
-如果双击脚本提示找不到 `uv`，需要在 WSL 内安装 `uv`，或者先确认 WSL 终端里执行 `uv --version` 能正常输出。
+后端日志：
+
+```bash
+tmux attach -t open-llm-vtuber
+```
+
+前端日志：
+
+```bash
+tmux attach -t open-llm-vtuber-frontend
+```
+
+从 PowerShell 直接查看后端最近日志：
+
+```powershell
+wsl.exe -d Ubuntu -- bash -lc "tmux capture-pane -t open-llm-vtuber -p -S -200 | tail -120"
+```
+
+Windows VoxCPM2 TTS 日志：
+
+```text
+C:\AI\Open-LLM-VTuber\logs\voxcpm2-windows.log
+C:\AI\Open-LLM-VTuber\logs\voxcpm2-windows.err.log
+```
+
+## 环境变量
+
+真实密钥放在项目根目录 `.env`，不要提交：
+
+```text
+C:\AI\Open-LLM-VTuber\.env
+```
+
+至少需要：
+
+```dotenv
+DEEPSEEK_API_KEY=...
+EXA_API_KEY=...
+```
+
+`conf.yaml` 通过 `${DEEPSEEK_API_KEY}`、`${EXA_API_KEY}` 引用这些变量。后端如果没有从 `.env` 读取到 key，LLM/MCP 会出现异常行为。
+
+## 当前语音链路
+
+ASR 当前使用 Qwen3-ASR vLLM：
+
+```yaml
+asr_model: 'qwen3_asr'
+qwen3_asr:
+  backend: 'vllm'
+  model_name: 'Qwen/Qwen3-ASR-0.6B'
+  vllm_gpu_memory_utilization: 0.25
+  vllm_max_model_len: 1024
+```
+
+TTS 当前使用 Windows VoxCPM2 NanoVLLM HTTP 服务：
+
+```yaml
+tts_model: 'voxcpm2_tts'
+voxcpm2_tts:
+  base_url: 'http://172.25.112.1:50005'
+```
+
+Windows 侧健康检查：
+
+```powershell
+curl.exe --noproxy "*" http://127.0.0.1:50005/health
+```
+
+WSL 侧健康检查需要使用 Windows WSL 网关地址，当前示例：
+
+```bash
+curl http://172.25.112.1:50005/health
+```
+
+如果 WSL 网关变化，用下面命令查看：
+
+```bash
+ip route | awk '/default/ {print $3; exit}'
+```
+
+## 验证
+
+启动后检查：
+
+```powershell
+curl.exe --noproxy "*" -I http://127.0.0.1:18080/
+curl.exe --noproxy "*" -I http://127.0.0.1:3000/
+```
+
+确认 WSL 实际跑的是 Windows 目录代码：
+
+```powershell
+wsl.exe -d Ubuntu -- ps -eo pid,args
+```
+
+正常应能看到类似：
+
+```text
+cd '/mnt/c/AI/Open-LLM-VTuber' && python run_server.py
+node /mnt/c/AI/Open-LLM-VTuber/frontend/...
+```

@@ -1,7 +1,11 @@
 param(
     [string]$TtsDir = "C:\AI\voxcpm2-nanovllm-win-venv",
-    [string]$TtsHost = "127.0.0.1",
+    [string]$TtsHost = "0.0.0.0",
     [int]$TtsPort = 50005,
+    [double]$GpuMemoryUtilization = 0.35,
+    [int]$MaxNumBatchedTokens = 2304,
+    [int]$MaxNumSeqs = 2,
+    [int]$MaxModelLen = 2304,
     [switch]$NoWait
 )
 
@@ -109,7 +113,16 @@ Write-Host ""
 Stop-Listener -Ports @($TtsPort) -Label "Windows VoxCPM2 TTS"
 
 $ttsProcess = Start-Process -FilePath "powershell.exe" `
-    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $ttsScript, "-HostName", $TtsHost, "-Port", $TtsPort) `
+    -ArgumentList @(
+        "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-File", $ttsScript,
+        "-HostName", $TtsHost,
+        "-Port", $TtsPort,
+        "-GpuMemoryUtilization", "$GpuMemoryUtilization",
+        "-MaxNumBatchedTokens", "$MaxNumBatchedTokens",
+        "-MaxNumSeqs", "$MaxNumSeqs",
+        "-MaxModelLen", "$MaxModelLen"
+    ) `
     -WorkingDirectory $TtsDir `
     -RedirectStandardOutput $ttsLog `
     -RedirectStandardError $ttsErr `

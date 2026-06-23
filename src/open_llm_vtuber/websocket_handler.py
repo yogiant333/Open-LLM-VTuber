@@ -755,7 +755,8 @@ class WebSocketHandler:
                     # Detected audio activity (voice)
                     self.received_data_buffers[client_uid] = np.append(
                         self.received_data_buffers[client_uid],
-                        np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32),
+                        np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
+                        / 32768.0,
                     )
                     await websocket.send_text(
                         json.dumps({"type": "control", "text": "mic-audio-end"})

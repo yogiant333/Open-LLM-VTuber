@@ -14,6 +14,16 @@ def _has_speakable_text(text: str) -> bool:
     return bool(re.search(r"[\w\u4e00-\u9fff]", text or ""))
 
 
+_FALLBACK_TTS_TEXT = "我没听清，请再说一遍。"
+_CONTROL_MARKUP_RE = re.compile(
+    r"(?i)\s*(?:\[[a-z][a-z0-9_.:-]*\]|</?[a-z][a-z0-9_.:-]*>)\s*"
+)
+
+
+def _strip_control_markup(text: str) -> str:
+    return _CONTROL_MARKUP_RE.sub("", text or "").strip()
+
+
 def sentence_divider(
     faster_first_response: bool = True,
     segment_method: str = "pysbd",
@@ -183,6 +193,7 @@ def tts_filter(
         ) -> AsyncIterator[Union[SentenceOutput, Dict[str, Any]]]:  # Yield type hint
             stream = func(*args, **kwargs)
             config = tts_preprocessor_config or TTSPreprocessorConfig()
+            fallback_emitted = False
 
             async for item in stream:
                 if (
@@ -194,20 +205,50 @@ def tts_filter(
                     if any(tag.name == "think" for tag in sentence.tags):
                         tts = ""
                     else:
+                        display_text_without_controls = _strip_control_markup(
+                            display.text
+                        )
+                        display.text = display_text_without_controls
+                        used_fallback = False
                         tts = filter_text(
-                            text=display.text,
+                            text=display_text_without_controls,
                             remove_special_char=config.remove_special_char,
                             ignore_brackets=config.ignore_brackets,
                             ignore_parentheses=config.ignore_parentheses,
                             ignore_asterisks=config.ignore_asterisks,
                             ignore_angle_brackets=config.ignore_angle_brackets,
                         )
-                        if not _has_speakable_text(tts) and display.text.strip():
+                        if (
+                            not _has_speakable_text(tts)
+                            and display.text.strip()
+                            and _has_speakable_text(display_text_without_controls)
+                        ):
                             logger.warning(
                                 "LLM produced non-speakable response, using fallback TTS text."
                             )
-                            display.text = "我在，刚刚没说清楚。"
+                            display.text = _FALLBACK_TTS_TEXT
                             tts = display.text
+                            fallback_emitted = True
+                            used_fallback = True
+                        elif (
+                            not _has_speakable_text(tts)
+                            and display.text.strip()
+                            and not _has_speakable_text(display_text_without_controls)
+                            and display_text_without_controls
+                            and not fallback_emitted
+                        ):
+                            logger.warning(
+                                "LLM produced punctuation-only response, using fallback TTS text."
+                            )
+                            display.text = _FALLBACK_TTS_TEXT
+                            tts = display.text
+                            fallback_emitted = True
+                            used_fallback = True
+
+                        if not _has_speakable_text(tts) and not used_fallback:
+                            tts = ""
+                            if not _has_speakable_text(display.text):
+                                display.text = ""
 
                     logger.debug(f"[{display.name}] display: {display.text}")
                     logger.debug(f"[{display.name}] tts: {tts}")

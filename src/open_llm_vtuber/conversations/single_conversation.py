@@ -86,6 +86,7 @@ async def process_single_conversation(
                 websocket_send,
                 username=client_uid,
                 metadata=metadata,
+                asr_model=context.character_config.asr_config.asr_model,
             )
         input_ready_ms = (time.perf_counter_ns() - turn_started_ns) / 1_000_000
         logger.info(

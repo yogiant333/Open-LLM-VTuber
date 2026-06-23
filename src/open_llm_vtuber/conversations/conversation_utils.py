@@ -1,6 +1,7 @@
 from typing import Optional, Union, Any, List, Dict
 import numpy as np
 import json
+import time
 from loguru import logger
 
 from ..message_handler import message_handler
@@ -9,6 +10,7 @@ from .tts_manager import TTSTaskManager
 from ..agent.output_types import SentenceOutput, AudioOutput
 from ..agent.input_types import BatchInput, TextData, ImageData, TextSource, ImageSource
 from ..asr.asr_interface import ASRInterface
+from ..asr.capture import provider_name_from_engine, save_asr_capture
 from ..live2d_model import Live2dModel
 from ..tts.tts_interface import TTSInterface
 from ..utils.stream_audio import prepare_audio_payload
@@ -224,11 +226,25 @@ async def process_user_input(
     websocket_send: WebSocketSend,
     username: str = "User",
     metadata: Optional[Dict[str, Any]] = None,
+    asr_model: Optional[str] = None,
 ) -> str:
     """Process user input, converting audio to text if needed"""
     if isinstance(user_input, np.ndarray):
         logger.info("Transcribing audio input...")
+        started = time.perf_counter()
         input_text = await asr_engine.async_transcribe_np(user_input)
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        capture_metadata = dict(metadata or {})
+        capture_metadata.setdefault("client_uid", username)
+        save_asr_capture(
+            audio=user_input,
+            transcript=input_text,
+            provider=asr_model or provider_name_from_engine(asr_engine),
+            source="conversation",
+            elapsed_ms=elapsed_ms,
+            sample_rate=asr_engine.SAMPLE_RATE,
+            metadata=capture_metadata,
+        )
         await send_question(input_text, username=username)
         await websocket_send(
             json.dumps({"type": "user-input-transcription", "text": input_text})
