@@ -44,6 +44,7 @@ class VADEngine(VADInterface):
         self.model = self.load_vad_model()
         self.state = StateMachine(self.config)
         self.window_size_samples = 512 if self.config.target_sr == 16000 else 256
+        self.pending_samples = np.array([], dtype=np.float32)
         # 512 / 16000 = 0.032s
 
     def load_vad_model(self):
@@ -52,10 +53,16 @@ class VADEngine(VADInterface):
 
     def detect_speech(self, audio_data: list[float]):
         audio_np = np.array(audio_data, dtype=np.float32)
-        for i in range(0, len(audio_np), self.window_size_samples):
+        if self.pending_samples.size:
+            audio_np = np.concatenate((self.pending_samples, audio_np))
+            self.pending_samples = np.array([], dtype=np.float32)
+
+        complete_size = (len(audio_np) // self.window_size_samples) * self.window_size_samples
+        if complete_size < len(audio_np):
+            self.pending_samples = audio_np[complete_size:].copy()
+
+        for i in range(0, complete_size, self.window_size_samples):
             chunk_np = audio_np[i : i + self.window_size_samples]
-            if len(chunk_np) < self.window_size_samples:
-                break
             chunk = torch.Tensor(chunk_np)
 
             with torch.no_grad():
