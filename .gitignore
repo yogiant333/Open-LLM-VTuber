@@ -73,6 +73,7 @@ conf.yaml.backup
 
 tmp/
 private/
+downloads/
 mcp_servers.json
 
 .vscode/
