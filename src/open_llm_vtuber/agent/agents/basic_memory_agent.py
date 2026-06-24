@@ -266,12 +266,15 @@ class BasicMemoryAgent(AgentInterface):
             return
 
         self._interrupt_handled = True
+        heard_response = (heard_response or "").strip()
 
         if self._memory and self._memory[-1]["role"] == "assistant":
-            if not self._memory[-1]["content"].endswith("..."):
+            if heard_response and not self._memory[-1]["content"].endswith("..."):
                 self._memory[-1]["content"] = heard_response + "..."
-            else:
+            elif heard_response:
                 self._memory[-1]["content"] = heard_response + "..."
+            elif not self._memory[-1]["content"].strip(" .。…"):
+                self._memory.pop()
         else:
             if heard_response:
                 self._memory.append(

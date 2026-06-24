@@ -238,10 +238,11 @@ def tts_filter(
                             and not fallback_emitted
                         ):
                             logger.warning(
-                                "LLM produced punctuation-only response, skipping TTS text."
+                                "LLM produced punctuation-only response, using fallback TTS text."
                             )
-                            display.text = ""
-                            tts = ""
+                            display.text = _FALLBACK_TTS_TEXT
+                            tts = display.text
+                            fallback_emitted = True
                             used_fallback = True
 
                         if not _has_speakable_text(tts) and not used_fallback:

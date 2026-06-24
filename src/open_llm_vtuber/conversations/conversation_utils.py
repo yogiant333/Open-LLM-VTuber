@@ -19,6 +19,7 @@ from ..utils.stream_audio import prepare_audio_payload
 from ..ue_avatar_protocol import (
     send_audio_end,
     send_audio_payload,
+    send_conversation_state,
     send_log,
     send_question,
     send_suggestions,
@@ -225,6 +226,7 @@ async def handle_audio_output(
 async def send_conversation_start_signals(websocket_send: WebSocketSend, username: str = "User") -> None:
     """Send initial conversation signals"""
     await send_log("思考中...", username=username)
+    await send_conversation_state("thinking", username=username)
     await websocket_send(
         json.dumps(
             {
@@ -317,12 +319,13 @@ async def finalize_conversation_turn(
             broadcast_ctx.current_client_uid,
         )
 
-    await send_conversation_end_signal(websocket_send, broadcast_ctx)
+    await send_conversation_end_signal(websocket_send, broadcast_ctx, username=client_uid)
 
 
 async def send_conversation_end_signal(
     websocket_send: WebSocketSend,
     broadcast_ctx: Optional[BroadcastContext],
+    username: str = "User",
     session_emoji: str = "😊",
 ) -> None:
     """Send conversation chain end signal"""
@@ -332,6 +335,10 @@ async def send_conversation_end_signal(
     }
 
     await websocket_send(json.dumps(chain_end_msg))
+    await send_conversation_state(
+        "idle",
+        username=broadcast_ctx.current_client_uid if broadcast_ctx and broadcast_ctx.current_client_uid else username,
+    )
 
     if broadcast_ctx and broadcast_ctx.broadcast_func and broadcast_ctx.group_members:
         await broadcast_ctx.broadcast_func(

@@ -197,6 +197,14 @@ class UeAvatarServer:
             metadata["username"] = username
         if output is not None:
             metadata["output"] = output
+        msg_type = payload.get("type")
+        if msg_type:
+            try:
+                from .message_handler import message_handler
+
+                message_handler.handle_message(metadata.get("username", "User"), payload)
+            except Exception as exc:
+                logger.warning(f"Failed handling UE avatar client message: {exc}")
         if username is not None or output is not None:
             logger.info(
                 "UE avatar client metadata updated: "

@@ -15,8 +15,12 @@ from .chat_group import (
 )
 from .message_handler import message_handler
 from .ue_avatar_server import ue_avatar_server
-from .ue_avatar_protocol import send_wakeup_status
-from .kws.audio_session import AudioSession
+from .ue_avatar_protocol import (
+    send_kws_state,
+    send_user_speech_state,
+    send_wakeup_status,
+)
+from .kws.audio_session import AudioSession, AudioSessionState
 from .utils.stream_audio import prepare_audio_payload
 from .chat_history_manager import (
     create_new_history,
@@ -77,6 +81,7 @@ class WebSocketHandler:
         self.received_data_buffers: Dict[str, np.ndarray] = {}
         self.user_speech_active: Dict[str, bool] = {}
         self.audio_sessions: Dict[str, AudioSession] = {}
+        self.kws_timeout_tasks: Dict[str, asyncio.Task] = {}
         self._event_loop: asyncio.AbstractEventLoop | None = None
         ue_avatar_server.set_status_listener(self._publish_ue_avatar_status)
 
@@ -331,6 +336,7 @@ class WebSocketHandler:
                 self._ensure_audio_session(uid, context)
             else:
                 self.audio_sessions.pop(uid, None)
+                self._cancel_kws_timeout_task(uid)
 
     def _ensure_audio_session(
         self, client_uid: str, context: ServiceContext
@@ -351,6 +357,59 @@ class WebSocketHandler:
             kws_engine=context.kws_engine,
             vad_engine=context.vad_engine,
         )
+
+    def _cancel_kws_timeout_task(self, client_uid: str) -> None:
+        task = self.kws_timeout_tasks.pop(client_uid, None)
+        if task and not task.done():
+            task.cancel()
+
+    def _schedule_kws_timeout_after_response(
+        self,
+        websocket: WebSocket,
+        client_uid: str,
+        audio_session: AudioSession,
+    ) -> None:
+        self._cancel_kws_timeout_task(client_uid)
+        timeout_seconds = float(
+            getattr(
+                audio_session.config,
+                "active_timeout_seconds",
+                audio_session.config.listen_timeout_seconds,
+            )
+        )
+
+        async def expire_awake_window() -> None:
+            try:
+                await asyncio.sleep(max(0.0, timeout_seconds))
+                if self.client_connections.get(client_uid) is not websocket:
+                    return
+                if self.audio_sessions.get(client_uid) is not audio_session:
+                    return
+                if audio_session.state != AudioSessionState.LISTENING:
+                    return
+
+                audio_session.mark_idle()
+                await websocket.send_text(
+                    json.dumps({"type": "control", "text": "wakeup-timeout"})
+                )
+                await send_kws_state(
+                    False,
+                    username=client_uid,
+                    reason="post-response-timeout",
+                    source="client-ws",
+                )
+                logger.info(
+                    "KWS post-response awake window timed out: client_uid={} seconds={}",
+                    client_uid,
+                    timeout_seconds,
+                )
+            except asyncio.CancelledError:
+                return
+            finally:
+                if self.kws_timeout_tasks.get(client_uid) is asyncio.current_task():
+                    self.kws_timeout_tasks.pop(client_uid, None)
+
+        self.kws_timeout_tasks[client_uid] = asyncio.create_task(expire_awake_window())
 
     async def _init_service_context(
         self, send_text: Callable, client_uid: str
@@ -537,6 +596,7 @@ class WebSocketHandler:
         self.received_data_buffers.pop(client_uid, None)
         self.user_speech_active.pop(client_uid, None)
         self.audio_sessions.pop(client_uid, None)
+        self._cancel_kws_timeout_task(client_uid)
         if client_uid in self.current_conversation_tasks:
             task = self.current_conversation_tasks[client_uid]
             if task and not task.done():
@@ -557,6 +617,7 @@ class WebSocketHandler:
         self.received_data_buffers.pop(client_uid, None)
         self.user_speech_active.pop(client_uid, None)
         self.audio_sessions.pop(client_uid, None)
+        self._cancel_kws_timeout_task(client_uid)
         self.chat_group_manager.client_group_map.pop(client_uid, None)
 
         if client_uid in self.current_conversation_tasks:
@@ -785,6 +846,7 @@ class WebSocketHandler:
         samples = np.array(data.get("audio", []), dtype=np.float32)
         for event in audio_session.accept_frame(samples):
             if event.type == "wakeup":
+                self._cancel_kws_timeout_task(client_uid)
                 payload = {
                     "type": "ue-wakeup",
                     "username": client_uid,
@@ -801,7 +863,15 @@ class WebSocketHandler:
                     username=client_uid,
                     source="client-ws",
                 )
+                await send_kws_state(
+                    True,
+                    username=client_uid,
+                    reason="wakeup-detected",
+                    keyword=event.keyword or "",
+                    source="client-ws",
+                )
             elif event.type == "speech-start":
+                self._cancel_kws_timeout_task(client_uid)
                 await self._send_user_speech_state(
                     websocket,
                     client_uid,
@@ -830,6 +900,7 @@ class WebSocketHandler:
                     "speech-end",
                 )
             elif event.type == "utterance" and event.audio is not None:
+                self._cancel_kws_timeout_task(client_uid)
                 if not self._is_valid_utterance_audio(event.audio, client_uid, "kws"):
                     await self._send_user_speech_state(
                         websocket,
@@ -856,6 +927,12 @@ class WebSocketHandler:
             elif event.type == "timeout":
                 await websocket.send_text(
                     json.dumps({"type": "control", "text": "wakeup-timeout"})
+                )
+                await send_kws_state(
+                    False,
+                    username=client_uid,
+                    reason="timeout",
+                    source="client-ws",
                 )
 
     def _is_valid_utterance_audio(
@@ -911,6 +988,12 @@ class WebSocketHandler:
                     "phase": phase,
                 }
             )
+        )
+        await send_user_speech_state(
+            active,
+            username=client_uid,
+            phase=phase,
+            source="client-ws",
         )
 
     async def _handle_conversation_trigger(
@@ -995,6 +1078,11 @@ class WebSocketHandler:
         audio_session = self.audio_sessions.get(client_uid)
         if audio_session:
             audio_session.mark_awake_after_response()
+            self._schedule_kws_timeout_after_response(
+                websocket,
+                client_uid,
+                audio_session,
+            )
 
     async def _handle_group_info(
         self, websocket: WebSocket, client_uid: str, data: WSMessage

@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import asyncio
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -56,6 +57,7 @@ class VoiceRecognition(ASRInterface):
         self.temperature = temperature
         self.engine = None
         self._dll_dirs = []
+        self._transcribe_lock = asyncio.Lock()
 
         working_dir_path = Path(self.working_dir)
         if not working_dir_path.is_dir():
@@ -110,6 +112,28 @@ class VoiceRecognition(ASRInterface):
             audio = audio.astype(np.float32)
         audio = np.clip(audio, -1, 1)
         return self._transcribe_python(audio)
+
+    async def async_transcribe_np(self, audio: np.ndarray) -> str:
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+        audio = np.clip(audio, -1, 1)
+
+        async with self._transcribe_lock:
+            transcribe_task = asyncio.create_task(asyncio.to_thread(self.transcribe_np, audio))
+            try:
+                return await asyncio.shield(transcribe_task)
+            except asyncio.CancelledError:
+                logger.info(
+                    "Qwen3-ASR-GGUF transcription cancelled by conversation interrupt; "
+                    "waiting for native decoder to exit before releasing ASR lock."
+                )
+                try:
+                    await transcribe_task
+                except Exception as exc:
+                    logger.warning(
+                        f"Qwen3-ASR-GGUF transcription ended after cancellation: {exc}"
+                    )
+                raise
 
     def shutdown(self) -> None:
         if self.engine is not None:

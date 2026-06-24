@@ -79,6 +79,68 @@ async def send_wakeup_status(
     )
 
 
+async def send_kws_state(
+    awakened: bool,
+    username: str = "User",
+    reason: str = "",
+    keyword: str = "",
+    source: str = "client-ws",
+) -> None:
+    await ue_avatar_server.send(
+        {
+            "Topic": "human",
+            "Data": {
+                "Key": "kws_state",
+                "Value": "awakened" if awakened else "sleeping",
+                "Awakened": awakened,
+                "Reason": reason,
+                "Keyword": keyword,
+                "Source": source,
+            },
+            "Username": username,
+        }
+    )
+
+
+async def send_user_speech_state(
+    active: bool,
+    username: str = "User",
+    phase: str = "",
+    source: str = "client-ws",
+) -> None:
+    await ue_avatar_server.send(
+        {
+            "Topic": "human",
+            "Data": {
+                "Key": "user_speech_state",
+                "Value": active,
+                "Active": active,
+                "Phase": phase,
+                "Source": source,
+            },
+            "Username": username,
+        }
+    )
+
+
+async def send_conversation_state(
+    state: str,
+    username: str = "User",
+    source: str = "client-ws",
+) -> None:
+    await ue_avatar_server.send(
+        {
+            "Topic": "human",
+            "Data": {
+                "Key": "conversation_state",
+                "Value": state,
+                "Source": source,
+            },
+            "Username": username,
+        }
+    )
+
+
 async def send_suggestions(
     suggestions: list[str],
     username: str = "User",
