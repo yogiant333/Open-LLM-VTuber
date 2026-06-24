@@ -148,7 +148,6 @@ class StateMachine:
                 self.hit_count += 1
                 if self.hit_count >= self.required_hits:
                     self.state = State.ACTIVE
-                    self.update(chunk_bytes, smoothed_prob, smoothed_db)
                     self.hit_count = 0
                     yield [], [], b"<|PAUSE|>"
             else:

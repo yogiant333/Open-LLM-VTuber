@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 from contextlib import redirect_stdout
 from io import StringIO
@@ -38,7 +39,8 @@ class VoiceRecognition(ASRInterface):
         self.working_dir = str(Path(working_dir).resolve())
         self.model_dir = str(Path(model_dir).resolve())
         self.language = language or None
-        self.context = self._merge_context_with_hotwords(context or "", hotwords)
+        self.hotwords = [word.strip() for word in hotwords or [] if word and word.strip()]
+        self.context = self._merge_context_with_hotwords(context or "", self.hotwords)
         self.use_dml = use_dml
         self.use_vulkan = use_vulkan
         self.timestamp = timestamp
@@ -179,4 +181,27 @@ class VoiceRecognition(ASRInterface):
                 language=self.language,
                 temperature=self.temperature,
             )
-        return (result.text or "").strip()
+        text = (result.text or "").strip()
+        if self._looks_like_hotword_list_hallucination(text):
+            logger.warning(
+                "Discarding Qwen3-ASR-GGUF transcript that looks like a hotword-list "
+                f"hallucination: {text!r}"
+            )
+            return ""
+        return text
+
+    def _looks_like_hotword_list_hallucination(self, text: str) -> bool:
+        if not text or len(self.hotwords) < 3:
+            return False
+
+        normalized_text = re.sub(r"[\s，,。！？!?、；;：:\"'“”‘’（）()《》\[\]【】]+", "", text)
+        if not normalized_text:
+            return False
+
+        hits = [word for word in self.hotwords if word and word in text]
+        if len(hits) < 3:
+            return False
+
+        hotword_chars = sum(len(word) for word in hits)
+        coverage = hotword_chars / max(len(normalized_text), 1)
+        return coverage >= 0.75

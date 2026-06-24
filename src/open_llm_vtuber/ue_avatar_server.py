@@ -13,8 +13,10 @@ class UeAvatarServer:
     """Fay-compatible WebSocket server for UE digital human clients."""
 
     def __init__(self, host: str | None = None, port: int | None = None):
-        self.host = host or os.getenv("OPEN_LLM_VTUBER_UE_WS_HOST", "127.0.0.1")
-        self.port = port or int(os.getenv("OPEN_LLM_VTUBER_UE_WS_PORT", "10002"))
+        host = host or os.getenv("OPEN_LLM_VTUBER_UE_WS_HOST", "127.0.0.1")
+        port = port or int(os.getenv("OPEN_LLM_VTUBER_UE_WS_PORT", "10002"))
+        self.host = host
+        self.port = port
         self._clients: dict[WebSocketServerProtocol, dict[str, Any]] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._server: Serve | None = None

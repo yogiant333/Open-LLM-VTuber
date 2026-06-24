@@ -32,7 +32,7 @@ character_config:
   conf_name: 'mao_pro' # 角色配置文件的名称
   conf_uid: 'mao_pro_001' # 角色配置的唯一标识符
   live2d_model_name: 'mao_pro' # Live2D 模型名称
-  character_name: '小智' # 将在群聊中使用，并显示为 AI 的名称。
+  character_name: '小孟' # 将在群聊中使用，并显示为 AI 的名称。
   avatar: 'mao.png' # 建议使用正方形图像作为头像。将其保存到 avatars 文件夹中。留空则使用角色名称的首字母作为头像。
   human_name: 'Human' # 将在群聊中使用，并显示为人类的名称。
 
@@ -41,7 +41,7 @@ character_config:
   # 只需在下面输入你想使用的人格提示。
   # 如果你想创建多个角色并在它们之间切换，请在 characters 文件夹中添加角色
   persona_prompt: |
-    你是“小智”，一个有真实存在感的中文数字人。
+    你是“小孟”，一个有真实存在感的中文数字人。
 
     你的性格是聪明、直接、轻松，略带一点调侃，但不刻薄。你像一个在现场陪用户聊天和协助操作的伙伴，而不是客服机器人。
 
@@ -228,18 +228,7 @@ character_config:
   asr_config:
     # 语音转文本模型选项：'faster_whisper', 'whisper_cpp', 'whisper', 'azure_asr', 'fun_asr', 'groq_whisper_asr', 'sherpa_onnx_asr', 'qwen3_asr', 'qwen3_asr_gguf'
     asr_model: 'qwen3_asr_gguf' # 使用的语音识别模型
-    hotwords: # ASR 公共热词；会按当前 ASR 自动映射到 context、prompt 或原生热词能力
-      - '小智'
-      - '孟昭泰'
-      - '迎峰度夏'
-      - '售电量'
-      - '用电量'
-      - '全省负荷'
-      - '供电服务'
-      - '台区'
-      - '国网河南电力'
-      - '智慧数字人'
-      - '一体机'
+    hotwords: [] # Qwen3-ASR-GGUF 当前禁用公共热词
 
     azure_asr:
       api_key: 'azure_api_key' # Azure API 密钥
@@ -341,7 +330,7 @@ character_config:
       device_map: 'cuda:0' # 只支持 GPU，不支持 cpu
       dtype: 'bfloat16' # 可选：bfloat16、float16
       language: 'Chinese' # 中文展厅场景固定中文；留空可自动检测
-      context: '请严格逐字转写音频中的原话，不要润色、不要改写、不要补全、不要总结。像“喂喂喂”“嗯”“啊”“能听见吗”这类口语和重复词也必须按听到的内容保留。'
+      context: ''
       max_new_tokens: 128
       max_inference_batch_size: 1
       attn_implementation:
@@ -355,7 +344,7 @@ character_config:
       working_dir: 'Qwen3-ASR-GGUF'
       model_dir: 'Qwen3-ASR-GGUF\model'
       language: 'Chinese'
-      context: '请严格逐字转写音频中的原话，不要润色、不要改写、不要补全、不要总结。像“喂喂喂”“嗯”“啊”“能听见吗”这类口语和重复词也必须按听到的内容保留。'
+      context: ''
       use_dml: true
       use_vulkan: true
       timestamp: false # 实时对话只需要文本，关闭 ForceAligner 时间戳以降低延迟；做字幕导出时再打开
@@ -372,7 +361,7 @@ character_config:
 
   # =================== 文本转语音 ===================
   tts_config:
-    tts_model: 'voxcpm2_tts' # 使用的文本转语音模型
+    tts_model: 'sherpa_onnx_tts' # 使用的文本转语音模型
     # 文本转语音模型选项：
     #   'azure_tts', 'pyttsx3_tts', 'edge_tts', 'bark_tts',
     #   'cosyvoice_tts', 'cosyvoice2_tts', 'cosyvoice3_tts', 'voxcpm2_tts', 'melo_tts', 'coqui_tts', 'piper_tts',
@@ -521,16 +510,16 @@ character_config:
     # TTS 模型下载：https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models
     # 查看 config_alts 获取更多示例
     sherpa_onnx_tts:
-      vits_model: '/path/to/tts-models/vits-melo-tts-zh_en/model.onnx' # VITS 模型文件路径
-      vits_lexicon: '/path/to/tts-models/vits-melo-tts-zh_en/lexicon.txt' # 词典文件路径（可选）
-      vits_tokens: '/path/to/tts-models/vits-melo-tts-zh_en/tokens.txt' # 标记文件路径
+      vits_model: 'models/vits-zh-hf-fanchen-wnj/vits-zh-hf-fanchen-wnj.onnx' # VITS 模型文件路径
+      vits_lexicon: 'models/vits-zh-hf-fanchen-wnj/lexicon.txt' # 词典文件路径（可选）
+      vits_tokens: 'models/vits-zh-hf-fanchen-wnj/tokens.txt' # 标记文件路径
       vits_data_dir: '' # '/path/to/tts-models/vits-piper-en_GB-cori-high/espeak-ng-data'  # espeak-ng 数据路径（可选）
-      vits_dict_dir: '/path/to/tts-models/vits-melo-tts-zh_en/dict' # Jieba 字典路径（可选，用于中文）
-      tts_rule_fsts: '/path/to/tts-models/vits-melo-tts-zh_en/number.fst,/path/to/tts-models/vits-melo-tts-zh_en/phone.fst,/path/to/tts-models/vits-melo-tts-zh_en/date.fst,/path/to/tts-models/vits-melo-tts-zh_en/new_heteronym.fst' # 规则 FST 文件路径（可选）
+      vits_dict_dir: 'models/vits-zh-hf-fanchen-wnj/dict' # Jieba 字典路径（可选，用于中文）
+      tts_rule_fsts: 'models/vits-zh-hf-fanchen-wnj/number.fst' # 规则 FST 文件路径（可选）
       max_num_sentences: 2 # 每批最大句子数（或 -1 表示全部）
-      sid: 1 # 说话人 ID（对于多说话人模型）
+      sid: 0 # 说话人 ID（对于多说话人模型）
       provider: 'cpu' # 使用 'cpu'、'cuda'（GPU）或 'coreml'（Apple）
-      num_threads: 1 # 计算线程数
+      num_threads: 8 # 计算线程数
       speed: 1.0 # 语速（1.0 为正常）
       debug: false # 启用调试模式（True/False）
     spark_tts:
@@ -589,7 +578,7 @@ character_config:
       prob_threshold: 0.4 # 语音活动检测的概率阈值
       db_threshold: 60 # 语音活动检测的分贝阈值
       required_hits: 3 # 连续命中次数以确认语音
-      required_misses: 32 # 连续未命中次数以确认静音，32 * 32ms ≈ 1.0s，避免一句话中间停顿被切断
+      required_misses: 18 # 连续未命中次数以确认静音，18 * 32ms ≈ 0.58s；当前状态机两段判定约 1.15s
       smoothing_window: 5 # 语音活动检测的平滑窗口大小
 
     utterance_filter:
@@ -602,7 +591,7 @@ character_config:
     enabled: true
     provider: sherpa_onnx_kws
     wake_words:
-      - 小智小智
+      - 小孟小孟
     sample_rate: 16000
     channels: 1
     audio_format: pcm_f32le

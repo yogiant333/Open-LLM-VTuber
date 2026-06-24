@@ -230,6 +230,9 @@ if ($VerboseLog) {
     $args += @("--log-level", "debug")
 }
 
+$env:OPEN_LLM_VTUBER_UE_WS_HOST = $BindHost
+$env:OPEN_LLM_VTUBER_UE_WS_PORT = [string]$UeWsPort
+
 $backendProcess = Start-Process -FilePath $backendPython `
     -ArgumentList $args `
     -WorkingDirectory $root `
