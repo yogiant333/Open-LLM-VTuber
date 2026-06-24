@@ -14,7 +14,7 @@ def _has_speakable_text(text: str) -> bool:
     return bool(re.search(r"[\w\u4e00-\u9fff]", text or ""))
 
 
-_FALLBACK_TTS_TEXT = "我没听清，请再说一遍。"
+_FALLBACK_TTS_TEXT = "我这边没有生成有效回复，请再试一次。"
 _CONTROL_MARKUP_RE = re.compile(
     r"(?i)\s*(?:\[[a-z][a-z0-9_.:-]*\]|</?[a-z][a-z0-9_.:-]*>)\s*"
 )
@@ -238,11 +238,10 @@ def tts_filter(
                             and not fallback_emitted
                         ):
                             logger.warning(
-                                "LLM produced punctuation-only response, using fallback TTS text."
+                                "LLM produced punctuation-only response, skipping TTS text."
                             )
-                            display.text = _FALLBACK_TTS_TEXT
-                            tts = display.text
-                            fallback_emitted = True
+                            display.text = ""
+                            tts = ""
                             used_fallback = True
 
                         if not _has_speakable_text(tts) and not used_fallback:

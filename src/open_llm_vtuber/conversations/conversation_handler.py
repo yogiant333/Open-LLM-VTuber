@@ -150,15 +150,17 @@ async def handle_individual_interrupt(
         except Exception as e:
             logger.error(f"Error handling interrupt: {e}")
 
+        heard_response = heard_response.strip()
         if context.history_uid:
-            store_message(
-                conf_uid=context.character_config.conf_uid,
-                history_uid=context.history_uid,
-                role="ai",
-                content=heard_response,
-                name=context.character_config.character_name,
-                avatar=context.character_config.avatar,
-            )
+            if heard_response:
+                store_message(
+                    conf_uid=context.character_config.conf_uid,
+                    history_uid=context.history_uid,
+                    role="ai",
+                    content=heard_response,
+                    name=context.character_config.character_name,
+                    avatar=context.character_config.avatar,
+                )
             store_message(
                 conf_uid=context.character_config.conf_uid,
                 history_uid=context.history_uid,
@@ -206,19 +208,21 @@ async def handle_group_interrupt(
 
     # Store messages with speaker info
     if context and group:
+        heard_response = heard_response.strip()
         for member_uid in group.members:
             if member_uid in client_contexts:
                 try:
                     member_ctx = client_contexts[member_uid]
                     member_ctx.agent_engine.handle_interrupt(heard_response)
-                    store_message(
-                        conf_uid=member_ctx.character_config.conf_uid,
-                        history_uid=member_ctx.history_uid,
-                        role="ai",
-                        content=heard_response,
-                        name=context.character_config.character_name,
-                        avatar=context.character_config.avatar,
-                    )
+                    if heard_response:
+                        store_message(
+                            conf_uid=member_ctx.character_config.conf_uid,
+                            history_uid=member_ctx.history_uid,
+                            role="ai",
+                            content=heard_response,
+                            name=context.character_config.character_name,
+                            avatar=context.character_config.avatar,
+                        )
                     store_message(
                         conf_uid=member_ctx.character_config.conf_uid,
                         history_uid=member_ctx.history_uid,
