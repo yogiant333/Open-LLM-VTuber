@@ -66,6 +66,9 @@ class AudioSession:
         if self.state == AudioSessionState.LISTENING:
             return self._process_listening(frame)
 
+        if self.state in {AudioSessionState.PROCESSING, AudioSessionState.SPEAKING}:
+            return self._process_speaking(frame)
+
         return []
 
     def mark_processing(self) -> None:
@@ -159,6 +162,21 @@ class AudioSession:
             logger.info("KWS active listening timed out: client_uid={}", self.client_uid)
             self.mark_idle()
             events.append(AudioSessionEvent(type="timeout"))
+        return events
+
+    def _process_speaking(self, frame: np.ndarray) -> list[AudioSessionEvent]:
+        events: list[AudioSessionEvent] = []
+        for audio_bytes in self.vad_engine.detect_speech(frame.tolist()):
+            if audio_bytes == b"<|PAUSE|>":
+                self._user_speech_active = True
+                events.append(AudioSessionEvent(type="speech-start"))
+            elif audio_bytes == b"<|RESUME|>":
+                self._user_speech_active = False
+                events.append(AudioSessionEvent(type="speech-end"))
+            elif len(audio_bytes) > 1024:
+                self._user_speech_active = False
+                audio = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+                events.append(AudioSessionEvent(type="utterance", audio=audio))
         return events
 
     def _append_ring(self, frame: np.ndarray) -> None:

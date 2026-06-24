@@ -811,6 +811,17 @@ class WebSocketHandler:
                 await websocket.send_text(
                     json.dumps({"type": "control", "text": "interrupt"})
                 )
+                task = self.current_conversation_tasks.get(client_uid)
+                if task and not task.done():
+                    logger.info(
+                        "KWS speech-start interrupts active conversation: client_uid={}",
+                        client_uid,
+                    )
+                    await self._handle_interrupt(
+                        websocket,
+                        client_uid,
+                        {"type": "interrupt-signal"},
+                    )
             elif event.type == "speech-end":
                 await self._send_user_speech_state(
                     websocket,
@@ -960,6 +971,10 @@ class WebSocketHandler:
         """
         Handle audio playback start notification
         """
+        audio_session = self.audio_sessions.get(client_uid)
+        if audio_session:
+            audio_session.mark_speaking()
+
         group_members = self.chat_group_manager.get_group_members(client_uid)
         if len(group_members) > 1:
             display_text = data.get("display_text")
