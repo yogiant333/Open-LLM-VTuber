@@ -44,6 +44,7 @@ memory.db.bk
 # Logs
 server.log
 logs/*
+reports/
 
 # Cache and models
 cache/*
