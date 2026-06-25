@@ -243,6 +243,13 @@ function getVolumeQualityText(quality: VolumeQuality) {
   return labels[quality];
 }
 
+function formatVolumeDbfs(dbfs: number) {
+  if (dbfs <= -99) {
+    return "-∞ dB";
+  }
+  return `${Math.round(dbfs)} dB`;
+}
+
 export function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const websocketRef = useRef<WebSocket | null>(null);
@@ -253,6 +260,7 @@ export function App() {
   const userTranscriptRef = useRef<HTMLDivElement | null>(null);
   const volumeLevelRef = useRef(0);
   const volumeQualityRef = useRef<VolumeQuality>("silent");
+  const volumeDbfsRef = useRef(-100);
   const activeAnswerIdRef = useRef("");
   const playbackQueueRef = useRef<PlaybackTask[]>([]);
   const isPlaybackQueueRunningRef = useRef(false);
@@ -274,6 +282,7 @@ export function App() {
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [webRtcStats, setWebRtcStats] = useState<WebRtcStatsSnapshot>(EMPTY_WEBRTC_STATS);
   const [volumeQuality, setVolumeQuality] = useState<VolumeQuality>("silent");
+  const [volumeDbfs, setVolumeDbfs] = useState(-100);
   const [question, setQuestion] = useState("");
   const [isInputOpen, setIsInputOpen] = useState(false);
   const [chatLines, setChatLines] = useState<ChatLine[]>([
@@ -504,7 +513,9 @@ export function App() {
     micCaptureRef.current = null;
     volumeLevelRef.current = 0;
     volumeQualityRef.current = "silent";
+    volumeDbfsRef.current = -100;
     setVolumeQuality("silent");
+    setVolumeDbfs(-100);
     if (volumeBarRef.current) {
       volumeBarRef.current.style.transform = "scaleX(0.03)";
       volumeBarRef.current.dataset.quality = "silent";
@@ -577,6 +588,11 @@ export function App() {
         if (audioLevel.quality !== volumeQualityRef.current) {
           volumeQualityRef.current = audioLevel.quality;
           setVolumeQuality(audioLevel.quality);
+        }
+        const roundedDbfs = Math.round(audioLevel.dbfs);
+        if (roundedDbfs !== volumeDbfsRef.current) {
+          volumeDbfsRef.current = roundedDbfs;
+          setVolumeDbfs(roundedDbfs);
         }
         if (volumeBarRef.current) {
           volumeBarRef.current.style.transform = `scaleX(${Math.max(0.03, nextLevel)})`;
@@ -1018,7 +1034,7 @@ export function App() {
           <div className="volume-track">
             <i ref={volumeBarRef} data-quality={volumeQuality} />
           </div>
-          <em>{getVolumeQualityText(volumeQuality)}</em>
+          <em title={getVolumeQualityText(volumeQuality)}>{formatVolumeDbfs(volumeDbfs)}</em>
         </div>
 
         <div className="wake-caption">
