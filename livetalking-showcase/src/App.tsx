@@ -189,22 +189,58 @@ function resampleFloat32(input: Float32Array, fromRate: number, toRate: number) 
   return output;
 }
 
-function getRmsLevel(samples: Float32Array) {
+type VolumeQuality = "silent" | "low" | "good" | "loud";
+
+interface VolumeLevel {
+  dbfs: number;
+  meter: number;
+  quality: VolumeQuality;
+}
+
+function getAudioLevel(samples: Float32Array): VolumeLevel {
   if (samples.length === 0) {
-    return 0;
+    return {
+      dbfs: -100,
+      meter: 0,
+      quality: "silent",
+    };
   }
 
   let sum = 0;
-  let peak = 0;
   for (let index = 0; index < samples.length; index += 1) {
     const sample = samples[index];
-    const abs = Math.abs(sample);
-    peak = Math.max(peak, abs);
     sum += sample * sample;
   }
 
   const rms = Math.sqrt(sum / samples.length);
-  return Math.min(1, Math.max(rms * 60, peak * 3.2));
+  const dbfs = 20 * Math.log10(Math.max(rms, 0.00001));
+  const normalized = Math.min(1, Math.max(0, (dbfs + 54) / 38));
+  const meter = normalized * 0.9;
+  let quality: VolumeQuality = "silent";
+
+  if (dbfs > -16) {
+    quality = "loud";
+  } else if (dbfs >= -34) {
+    quality = "good";
+  } else if (dbfs >= -46) {
+    quality = "low";
+  }
+
+  return {
+    dbfs,
+    meter,
+    quality,
+  };
+}
+
+function getVolumeQualityText(quality: VolumeQuality) {
+  const labels: Record<VolumeQuality, string> = {
+    silent: "未检测到人声",
+    low: "声音偏小",
+    good: "音量可识别",
+    loud: "声音过响",
+  };
+  return labels[quality];
 }
 
 export function App() {
@@ -216,6 +252,7 @@ export function App() {
   const answerListRef = useRef<HTMLDivElement | null>(null);
   const userTranscriptRef = useRef<HTMLDivElement | null>(null);
   const volumeLevelRef = useRef(0);
+  const volumeQualityRef = useRef<VolumeQuality>("silent");
   const activeAnswerIdRef = useRef("");
   const playbackQueueRef = useRef<PlaybackTask[]>([]);
   const isPlaybackQueueRunningRef = useRef(false);
@@ -236,6 +273,7 @@ export function App() {
   const [answerEntries, setAnswerEntries] = useState<AnswerEntry[]>([]);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [webRtcStats, setWebRtcStats] = useState<WebRtcStatsSnapshot>(EMPTY_WEBRTC_STATS);
+  const [volumeQuality, setVolumeQuality] = useState<VolumeQuality>("silent");
   const [question, setQuestion] = useState("");
   const [isInputOpen, setIsInputOpen] = useState(false);
   const [chatLines, setChatLines] = useState<ChatLine[]>([
@@ -465,8 +503,11 @@ export function App() {
     capture.audioContext.close().catch(() => undefined);
     micCaptureRef.current = null;
     volumeLevelRef.current = 0;
+    volumeQualityRef.current = "silent";
+    setVolumeQuality("silent");
     if (volumeBarRef.current) {
       volumeBarRef.current.style.transform = "scaleX(0.03)";
+      volumeBarRef.current.dataset.quality = "silent";
     }
     setMicState("disconnected");
   }, []);
@@ -530,10 +571,16 @@ export function App() {
       const visualSamples = new Float32Array(analyser.fftSize);
       const updateVolumeMeter = () => {
         analyser.getFloatTimeDomainData(visualSamples);
-        const nextLevel = volumeLevelRef.current * 0.55 + getRmsLevel(visualSamples) * 0.45;
+        const audioLevel = getAudioLevel(visualSamples);
+        const nextLevel = volumeLevelRef.current * 0.82 + audioLevel.meter * 0.18;
         volumeLevelRef.current = nextLevel;
+        if (audioLevel.quality !== volumeQualityRef.current) {
+          volumeQualityRef.current = audioLevel.quality;
+          setVolumeQuality(audioLevel.quality);
+        }
         if (volumeBarRef.current) {
           volumeBarRef.current.style.transform = `scaleX(${Math.max(0.03, nextLevel)})`;
+          volumeBarRef.current.dataset.quality = audioLevel.quality;
         }
 
         const capture = micCaptureRef.current;
@@ -969,8 +1016,9 @@ export function App() {
         <div className="volume-meter" aria-label="麦克风音量">
           <span>MIC</span>
           <div className="volume-track">
-            <i ref={volumeBarRef} />
+            <i ref={volumeBarRef} data-quality={volumeQuality} />
           </div>
+          <em>{getVolumeQualityText(volumeQuality)}</em>
         </div>
 
         <div className="wake-caption">
