@@ -567,6 +567,7 @@ export function App() {
 
       if (message.type === "backend-synth-complete") {
         backendSynthCompleteRef.current = true;
+        activeAnswerIdRef.current = "";
         notifyPlaybackCompleteIfReady();
       }
 
@@ -583,7 +584,6 @@ export function App() {
         }
         if (message.text === "mic-audio-end") {
           setIsAwake(true);
-          resetAnswerDraft();
         }
         if (message.text === "wakeup-detected") {
           setIsAwake(true);
