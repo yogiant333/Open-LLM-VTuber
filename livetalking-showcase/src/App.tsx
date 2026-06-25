@@ -1,4 +1,4 @@
-import { BarChart3, Clock3, Keyboard, MessageSquareX, Mic, MicOff, PlugZap, RotateCcw, Send, Square } from "lucide-react";
+import { BarChart3, Clock3, Keyboard, MessageSquareX, Mic, MicOff, PlugZap, Send } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LiveTalkingClient } from "./livetalking";
 import type { BackendMessage, ChatLine, ConnectionState } from "./types";
@@ -978,9 +978,6 @@ export function App() {
         </div>
 
         <div className="floating-actions">
-          <button title="重新连接" onClick={connectLiveTalking}>
-            <RotateCcw size={18} />
-          </button>
           <button title="键盘输入" onClick={() => setIsInputOpen((current) => !current)}>
             <Keyboard size={18} />
           </button>
@@ -1000,9 +997,6 @@ export function App() {
             }}
           >
             {micState === "ready" ? <Mic size={18} /> : <MicOff size={18} />}
-          </button>
-          <button title="打断" onClick={handleInterrupt}>
-            <Square size={16} />
           </button>
         </div>
 
