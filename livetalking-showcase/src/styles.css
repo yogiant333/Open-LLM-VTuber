@@ -416,6 +416,45 @@ button {
   border-bottom: 0;
 }
 
+.user-transcript {
+  position: absolute;
+  left: clamp(14px, 3vw, 28px);
+  top: calc(clamp(62px, 8vh, 92px) + 38vh);
+  z-index: 5;
+  width: 33.333%;
+  min-width: 0;
+  max-height: 13vh;
+  padding: 7px 9px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: rgba(0, 10, 12, 0.26);
+  backdrop-filter: blur(10px);
+}
+
+.user-transcript span {
+  color: rgba(255, 216, 74, 0.9);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.user-transcript p {
+  margin: 4px 0 0;
+  max-height: calc(13vh - 26px);
+  overflow-y: auto;
+  color: #f9fffb;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  white-space: pre-wrap;
+  scrollbar-width: thin;
+}
+
+.user-transcript.is-final span {
+  color: rgba(32, 214, 199, 0.9);
+}
+
 .floating-actions {
   position: absolute;
   top: 46%;

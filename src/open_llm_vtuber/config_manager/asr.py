@@ -119,15 +119,25 @@ class WhisperConfig(I18nMixin):
 class FunASRConfig(I18nMixin):
     """Configuration for FunASR."""
 
-    model_name: str = Field("iic/SenseVoiceSmall", alias="model_name")
-    vad_model: str = Field("fsmn-vad", alias="vad_model")
-    punc_model: str = Field("ct-punc", alias="punc_model")
+    model_name: str = Field("paraformer-zh-online", alias="model_name")
+    vad_model: Optional[str] = Field("fsmn-vad", alias="vad_model")
+    punc_model: Optional[str] = Field("ct-punc", alias="punc_model")
     device: Literal["cpu", "cuda"] = Field("cpu", alias="device")
     disable_update: bool = Field(True, alias="disable_update")
+    model_revision: Optional[str] = Field("v2.0.4", alias="model_revision")
     ncpu: int = Field(4, alias="ncpu")
     hub: Literal["ms", "hf"] = Field("ms", alias="hub")
     use_itn: bool = Field(False, alias="use_itn")
     language: str = Field("auto", alias="language")
+    streaming_enabled: bool = Field(True, alias="streaming_enabled")
+    streaming_model_name: str = Field(
+        "paraformer-zh-online", alias="streaming_model_name"
+    )
+    streaming_chunk_size: list[int] = Field(
+        default_factory=lambda: [0, 10, 5], alias="streaming_chunk_size"
+    )
+    encoder_chunk_look_back: int = Field(4, alias="encoder_chunk_look_back")
+    decoder_chunk_look_back: int = Field(1, alias="decoder_chunk_look_back")
 
     DESCRIPTIONS: ClassVar[Dict[str, Description]] = {
         "model_name": Description(en="Name of the FunASR model", zh="FunASR 模型名称"),
@@ -142,6 +152,10 @@ class FunASRConfig(I18nMixin):
             en="Disable checking for FunASR updates on launch",
             zh="启动时禁用 FunASR 更新检查",
         ),
+        "model_revision": Description(
+            en="Optional ModelScope model revision for FunASR models",
+            zh="可选的 FunASR ModelScope 模型版本",
+        ),
         "ncpu": Description(
             en="Number of CPU threads for internal operations",
             zh="内部操作的 CPU 线程数",
@@ -155,6 +169,26 @@ class FunASRConfig(I18nMixin):
         ),
         "language": Description(
             en="Language code (e.g., auto, zh, en)", zh="语言代码（如 auto、zh、en）"
+        ),
+        "streaming_enabled": Description(
+            en="Enable realtime partial transcription with FunASR streaming model",
+            zh="启用 FunASR 流式模型的实时增量识别",
+        ),
+        "streaming_model_name": Description(
+            en="Name of the FunASR streaming model",
+            zh="FunASR 流式模型名称",
+        ),
+        "streaming_chunk_size": Description(
+            en="FunASR streaming chunk_size, default [0, 10, 5]",
+            zh="FunASR 流式 chunk_size，默认 [0, 10, 5]",
+        ),
+        "encoder_chunk_look_back": Description(
+            en="Encoder chunk look-back for streaming Paraformer",
+            zh="流式 Paraformer 编码器回看块数",
+        ),
+        "decoder_chunk_look_back": Description(
+            en="Decoder chunk look-back for streaming Paraformer",
+            zh="流式 Paraformer 解码器回看块数",
         ),
     }
 

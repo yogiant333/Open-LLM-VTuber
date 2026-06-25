@@ -66,7 +66,15 @@ class ASRFactory:
                 hub=kwargs.get("hub"),
                 device=kwargs.get("device"),
                 language=kwargs.get("language"),
+                model_revision=kwargs.get("model_revision", "v2.0.4"),
                 use_itn=kwargs.get("use_itn"),
+                streaming_enabled=kwargs.get("streaming_enabled", True),
+                streaming_model_name=kwargs.get(
+                    "streaming_model_name", "paraformer-zh-online"
+                ),
+                streaming_chunk_size=kwargs.get("streaming_chunk_size"),
+                encoder_chunk_look_back=kwargs.get("encoder_chunk_look_back", 4),
+                decoder_chunk_look_back=kwargs.get("decoder_chunk_look_back", 1),
                 # sample_rate=kwargs.get("sample_rate"),
             )
         elif system_name == "azure_asr":

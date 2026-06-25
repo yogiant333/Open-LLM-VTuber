@@ -208,15 +208,21 @@ character_config:
     # to download / check the models. You can disconnect the internet after initialization.
     # Or you can use sherpa onnx asr or Faster-Whisper for complete offline experience
     fun_asr:
-      model_name: 'iic/SenseVoiceSmall' # or 'paraformer-zh'
+      model_name: 'paraformer-zh-online' # FunASR streaming Paraformer, also used for final transcription
       vad_model: 'fsmn-vad' # this is only used to make it works if audio is longer than 30s
       punc_model: 'ct-punc' # punctuation model.
       device: 'cpu'
       disable_update: True # should we check FunASR updates everytime on launch
+      model_revision: 'v2.0.4' # ModelScope model revision
       ncpu: 4 # number of threads for CPU internal operations.
       hub: 'ms' # ms (default) to download models from ModelScope. Use hf to download models from Hugging Face.
       use_itn: False
       language: 'auto' # zh, en, auto
+      streaming_enabled: True # enable streaming partial ASR for realtime user transcript display
+      streaming_model_name: 'paraformer-zh-online' # FunASR streaming model
+      streaming_chunk_size: [0, 10, 5] # about 600ms chunks, matching FunASR's streaming example
+      encoder_chunk_look_back: 4
+      decoder_chunk_look_back: 1
 
     # pip install sherpa-onnx
     # documentation: https://k2-fsa.github.io/sherpa/onnx/index.html

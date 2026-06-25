@@ -1,34 +1,26 @@
 import io
-import os
 import re
+import asyncio
 import torch
 import numpy as np
 import soundfile as sf
 from funasr import AutoModel
-from .asr_interface import ASRInterface
+from .asr_interface import ASRInterface, StreamingASRResult
 from typing import Optional
-
-# Try to import modelscope for local cache detection
-try:
-    from modelscope.hub.snapshot_download import snapshot_download
-
-    MODEL_SCOPE_DOWNLOAD_AVAILABLE = True
-except ImportError:
-    print("Warning: Unable to import modelscope.hub.snapshot_download.")
-    MODEL_SCOPE_DOWNLOAD_AVAILABLE = False
 
 # Model alias to actual ModelScope ID mapping table
 MODEL_ALIAS_TO_FULL_ID_MAP = {
     "paraformer-zh": "iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
     "paraformer-zh-spk": "iic/speech_paraformer-large-vad-punc-spk_asr_nat-zh-cn",
     "paraformer-zh-online": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
+    "paraformer-zh-streaming": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online",
     "paraformer-en": "iic/speech_paraformer-large-vad-punc_asr_nat-en-16k-common-vocab10020",
     "conformer-en": "iic/speech_conformer_asr-en-16k-vocab4199-pytorch",
     "ct-punc": "iic/punc_ct-transformer_cn-en-common-vocab471067-large",
     "fsmn-vad": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
     "fa-zh": "iic/speech_timestamp_prediction-v1-16k-offline",
-    "SenseVoiceSmall": "iic/SenseVoiceSmall",
-    "iic/SenseVoiceSmall": "iic/SenseVoiceSmall",
+    "SenseVoiceSmall": "SenseVoiceSmall",
+    "iic/SenseVoiceSmall": "SenseVoiceSmall",
 }
 
 
@@ -47,8 +39,14 @@ class VoiceRecognition(ASRInterface):
         hub: str = None,
         device: str = "cpu",
         disable_update: bool = True,
+        model_revision: str | None = "v2.0.4",
         sample_rate: int = 16000,
         use_itn: bool = False,
+        streaming_enabled: bool = True,
+        streaming_model_name: str = "paraformer-zh-online",
+        streaming_chunk_size: list[int] | None = None,
+        encoder_chunk_look_back: int = 4,
+        decoder_chunk_look_back: int = 1,
     ) -> None:
         # Resolve model paths
         final_model_input = self._get_final_model_input(model_name)
@@ -57,48 +55,123 @@ class VoiceRecognition(ASRInterface):
             self._get_final_model_input(punc_model) if punc_model else None
         )
 
+        model_kwargs = {
+            "model": final_model_input,
+            "vad_model": final_vad_input,
+            "ncpu": ncpu,
+            "hub": hub,
+            "device": device,
+            "disable_update": disable_update,
+            "model_revision": model_revision,
+            "punc_model": final_punc_input,
+            # "spk_model": "cam++",
+        }
         self.model = AutoModel(
-            model=final_model_input,
-            vad_model=final_vad_input,
-            ncpu=ncpu,
-            hub=hub,
-            device=device,
-            disable_update=disable_update,
-            punc_model=final_punc_input,
-            # spk_model="cam++",
+            **{key: value for key, value in model_kwargs.items() if value is not None}
         )
         self.SAMPLE_RATE = sample_rate
         self.use_itn = use_itn
         self.language = language
+        self.streaming_enabled = streaming_enabled
+        self.streaming_chunk_size = streaming_chunk_size or [0, 10, 5]
+        self.encoder_chunk_look_back = encoder_chunk_look_back
+        self.decoder_chunk_look_back = decoder_chunk_look_back
+        self._streaming_cache_by_session: dict[str, dict] = {}
+        self._streaming_text_by_session: dict[str, str] = {}
+        self._streaming_lock = asyncio.Lock()
+        self.streaming_model = None
+        if streaming_enabled:
+            final_streaming_model_input = self._get_final_model_input(
+                streaming_model_name
+            )
+            if final_streaming_model_input == final_model_input:
+                self.streaming_model = self.model
+            else:
+                streaming_model_kwargs = {
+                    "model": final_streaming_model_input,
+                    "ncpu": ncpu,
+                    "hub": hub,
+                    "device": device,
+                    "disable_update": disable_update,
+                    "model_revision": model_revision,
+                }
+                self.streaming_model = AutoModel(
+                    **{
+                        key: value
+                        for key, value in streaming_model_kwargs.items()
+                        if value is not None
+                    }
+                )
+
+    @property
+    def supports_streaming(self) -> bool:
+        return bool(self.streaming_model)
+
+    def reset_streaming_session(self, session_id: str) -> None:
+        self._streaming_cache_by_session.pop(session_id, None)
+        self._streaming_text_by_session.pop(session_id, None)
+
+    async def async_streaming_transcribe_np(
+        self,
+        session_id: str,
+        audio: np.ndarray,
+        *,
+        is_final: bool = False,
+    ) -> list[StreamingASRResult]:
+        if not self.streaming_model or audio.size == 0:
+            return []
+
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+
+        async with self._streaming_lock:
+            return await asyncio.to_thread(
+                self._streaming_transcribe_np_sync,
+                session_id,
+                audio,
+                is_final,
+            )
+
+    def _streaming_transcribe_np_sync(
+        self,
+        session_id: str,
+        audio: np.ndarray,
+        is_final: bool,
+    ) -> list[StreamingASRResult]:
+        cache = self._streaming_cache_by_session.setdefault(session_id, {})
+        res = self.streaming_model.generate(
+            input=audio,
+            cache=cache,
+            is_final=is_final,
+            chunk_size=self.streaming_chunk_size,
+            encoder_chunk_look_back=self.encoder_chunk_look_back,
+            decoder_chunk_look_back=self.decoder_chunk_look_back,
+        )
+        text = self._clean_text(res[0].get("text", "") if res else "")
+        previous_text = self._streaming_text_by_session.get(session_id, "")
+        next_text = previous_text
+        if text:
+            next_text = (
+                text if text.startswith(previous_text) else f"{previous_text}{text}"
+            )
+            self._streaming_text_by_session[session_id] = next_text
+        if is_final:
+            self.reset_streaming_session(session_id)
+            return [StreamingASRResult(text=next_text, is_final=True)]
+        if not text or next_text == previous_text:
+            return []
+        return [StreamingASRResult(text=next_text, is_final=False)]
 
     def _get_final_model_input(self, alias_or_id: Optional[str]) -> Optional[str]:
         """
         Process model input function:
         1. Check mapping table to get canonical ModelScope ID.
-        2. Try to get local path using snapshot_download.
-        3. If local path is valid, return local path, otherwise return canonical ModelScope ID.
+        2. Return the canonical ID and let FunASR/ModelScope resolve cache paths.
         """
         if not alias_or_id:
             return None
 
-        # Get canonical ModelScope ID from mapping table
-        resolved_id = MODEL_ALIAS_TO_FULL_ID_MAP.get(alias_or_id, alias_or_id)
-        final_input_for_automodel = resolved_id  # Default to use resolved ID
-
-        # Try to get local path using snapshot_download
-        if MODEL_SCOPE_DOWNLOAD_AVAILABLE:
-            try:
-                local_path = snapshot_download(resolved_id, local_files_only=True)
-                if os.path.exists(local_path):  # Double check path exists
-                    final_input_for_automodel = local_path  # Use local path if found
-                    # print(f"Successfully resolved '{resolved_id}' to local path: {local_path}")
-            except ValueError:
-                # Not found in local cache, use original ID
-                pass
-            except Exception as e:
-                print(f"Error occurred while checking '{resolved_id}': {e}")
-
-        return final_input_for_automodel
+        return MODEL_ALIAS_TO_FULL_ID_MAP.get(alias_or_id, alias_or_id)
 
     def transcribe_np(self, audio: np.ndarray) -> str:
         audio_tensor = torch.tensor(audio, dtype=torch.float32)
@@ -116,12 +189,15 @@ class VoiceRecognition(ASRInterface):
         # like this: '<|zh|><|NEUTRAL|><|Speech|><|woitn|>欢迎大家来体验达摩院推出的语音识别模型'
         # we should remove those tags from the result
 
-        # remove tags
-        full_text = re.sub(r"<\|.*?\|>", "", full_text)
-        # the tags can also look like '< | en | > < | EMO _ UNKNOWN | > < | S pe ech | > < | wo itn | > ', so...
-        full_text = re.sub(r"< \|.*?\| >", "", full_text)
+        return self._clean_text(full_text)
 
-        return full_text.strip()
+    @staticmethod
+    def _clean_text(text: str) -> str:
+        # remove SenseVoice-style tags
+        text = re.sub(r"<\|.*?\|>", "", text)
+        # the tags can also look like '< | en | > < | EMO _ UNKNOWN | > < | S pe ech | > < | wo itn | > '
+        text = re.sub(r"< \|.*?\| >", "", text)
+        return text.strip()
 
     def _numpy_to_wav_in_memory(self, numpy_array: np.ndarray, sample_rate):
         memory_file = io.BytesIO()

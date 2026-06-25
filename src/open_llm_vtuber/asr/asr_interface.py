@@ -1,6 +1,13 @@
 import abc
 import numpy as np
 import asyncio
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class StreamingASRResult:
+    text: str
+    is_final: bool = False
 
 
 class ASRInterface(metaclass=abc.ABCMeta):
@@ -23,6 +30,23 @@ class ASRInterface(metaclass=abc.ABCMeta):
         if audio.dtype != np.float32:
             audio = audio.astype(np.float32)
         return await asyncio.to_thread(self.transcribe_np, audio)
+
+    @property
+    def supports_streaming(self) -> bool:
+        return False
+
+    def reset_streaming_session(self, session_id: str) -> None:
+        """Reset provider-owned streaming state for a client/session."""
+
+    async def async_streaming_transcribe_np(
+        self,
+        session_id: str,
+        audio: np.ndarray,
+        *,
+        is_final: bool = False,
+    ) -> list[StreamingASRResult]:
+        """Optionally transcribe an audio chunk and return partial/final text."""
+        return []
 
     @abc.abstractmethod
     def transcribe_np(self, audio: np.ndarray) -> str:

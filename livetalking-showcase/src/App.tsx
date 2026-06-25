@@ -248,6 +248,8 @@ export function App() {
   const [sessionId, setSessionId] = useState("");
   const [isAwake, setIsAwake] = useState(false);
   const [subtitle, setSubtitle] = useState(WAKE_TEXT);
+  const [userTranscript, setUserTranscript] = useState("");
+  const [isUserTranscriptFinal, setIsUserTranscriptFinal] = useState(false);
   const [answerText, setAnswerText] = useState(INITIAL_ANSWER_TEXT);
   const [answerEntries, setAnswerEntries] = useState<AnswerEntry[]>([]);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
@@ -705,6 +707,25 @@ export function App() {
         notifyPlaybackCompleteIfReady();
       }
 
+      if (message.type === "user-input-transcription-stream") {
+        const text = message.text?.trim() ?? "";
+        if (text) {
+          setIsAwake(true);
+          setUserTranscript(text);
+          setIsUserTranscriptFinal(Boolean(message.is_final));
+        }
+      }
+
+      if (message.type === "user-input-transcription") {
+        const text = message.text?.trim() ?? "";
+        if (text) {
+          setIsAwake(true);
+          setUserTranscript(text);
+          setIsUserTranscriptFinal(!message.rejected);
+          appendLine("user", text);
+        }
+      }
+
       if (message.type === "conversation-cleared") {
         const successText = message.success === false ? "后端会话清空失败" : "会话已清空";
         setStatusMessage(successText);
@@ -725,10 +746,14 @@ export function App() {
         if (message.text === "wakeup-detected") {
           setIsAwake(true);
           setSubtitle("我在，请说。");
+          setUserTranscript("");
+          setIsUserTranscriptFinal(false);
         }
         if (message.text === "wakeup-timeout") {
           setIsAwake(false);
           setSubtitle(WAKE_TEXT);
+          setUserTranscript("");
+          setIsUserTranscriptFinal(false);
         }
       }
     };
@@ -831,6 +856,8 @@ export function App() {
     setAnswerEntries([]);
     setAnswerText("");
     setQuestion("");
+    setUserTranscript("");
+    setIsUserTranscriptFinal(false);
     setIsAwake(false);
     setSubtitle(WAKE_TEXT);
     setStatusMessage("正在清空会话");
@@ -930,6 +957,13 @@ export function App() {
                 <p key={entry.id}>{entry.text}</p>
               ))}
             </div>
+          </div>
+        )}
+
+        {userTranscript && (
+          <div className={`user-transcript ${isUserTranscriptFinal ? "is-final" : ""}`}>
+            <span>{isUserTranscriptFinal ? "已识别" : "正在识别"}</span>
+            <p>{userTranscript}</p>
           </div>
         )}
 

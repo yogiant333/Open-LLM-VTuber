@@ -230,15 +230,21 @@ character_config:
     # FunASR 目前需要在启动时连接互联网以下载/检查模型。您可以在初始化后断开互联网连接。
     # 或者您可以使用 sherpa onnx asr 或 Faster-Whisper 获得完全离线的体验
     fun_asr:
-      model_name: 'iic/SenseVoiceSmall' # 或 'paraformer-zh'
+      model_name: 'paraformer-zh-online' # FunASR 流式 Paraformer，可用于最终转写
       vad_model: 'fsmn-vad' # 仅当音频长度超过 30 秒时才需要使用
       punc_model: 'ct-punc' # 标点符号模型
       device: 'cpu' # 设备
       disable_update: True # 是否每次启动时都检查 FunASR 更新
+      model_revision: 'v2.0.4' # ModelScope 模型版本
       ncpu: 4 # CPU 内部操作的线程数
       hub: 'ms' # ms（默认）从 ModelScope 下载模型。使用 hf 从 Hugging Face 下载模型。
       use_itn: False # 是否使用数字格式转换
       language: 'auto' # zh, en, auto
+      streaming_enabled: True # 是否启用流式增量识别，用于前端实时显示用户正在说的字
+      streaming_model_name: 'paraformer-zh-online' # FunASR 流式模型
+      streaming_chunk_size: [0, 10, 5] # 约 600ms chunk，参考 FunASR 官方示例
+      encoder_chunk_look_back: 4
+      decoder_chunk_look_back: 1
 
     # pip install sherpa-onnx
     # 文档：https://k2-fsa.github.io/sherpa/onnx/index.html

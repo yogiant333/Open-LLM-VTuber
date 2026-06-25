@@ -80,6 +80,8 @@ class WebSocketHandler:
         self.default_context_cache = default_context_cache
         self.received_data_buffers: Dict[str, np.ndarray] = {}
         self.user_speech_active: Dict[str, bool] = {}
+        self.asr_stream_active: Dict[str, bool] = {}
+        self.asr_stream_buffers: Dict[str, np.ndarray] = {}
         self.audio_sessions: Dict[str, AudioSession] = {}
         self.kws_timeout_tasks: Dict[str, asyncio.Task] = {}
         self.client_played_response_texts: Dict[str, str] = {}
@@ -179,6 +181,8 @@ class WebSocketHandler:
         self.client_contexts[client_uid] = session_service_context
         self.received_data_buffers[client_uid] = np.array([])
         self.user_speech_active[client_uid] = False
+        self.asr_stream_active[client_uid] = False
+        self.asr_stream_buffers[client_uid] = np.array([], dtype=np.float32)
 
         self.chat_group_manager.client_group_map[client_uid] = ""
         await self.send_group_update(websocket, client_uid)
@@ -631,6 +635,8 @@ class WebSocketHandler:
         self.client_contexts.pop(client_uid, None)
         self.received_data_buffers.pop(client_uid, None)
         self.user_speech_active.pop(client_uid, None)
+        self.asr_stream_active.pop(client_uid, None)
+        self.asr_stream_buffers.pop(client_uid, None)
         self.audio_sessions.pop(client_uid, None)
         self._cancel_kws_timeout_task(client_uid)
         if client_uid in self.current_conversation_tasks:
@@ -652,6 +658,8 @@ class WebSocketHandler:
         self.client_contexts.pop(client_uid, None)
         self.received_data_buffers.pop(client_uid, None)
         self.user_speech_active.pop(client_uid, None)
+        self.asr_stream_active.pop(client_uid, None)
+        self.asr_stream_buffers.pop(client_uid, None)
         self.audio_sessions.pop(client_uid, None)
         self._cancel_kws_timeout_task(client_uid)
         self.chat_group_manager.client_group_map.pop(client_uid, None)
@@ -884,6 +892,8 @@ class WebSocketHandler:
         if chunk:
             for audio_bytes in context.vad_engine.detect_speech(chunk):
                 if audio_bytes == b"<|PAUSE|>":
+                    self._reset_asr_stream(client_uid)
+                    self.asr_stream_active[client_uid] = True
                     await self._send_user_speech_state(
                         websocket,
                         client_uid,
@@ -921,6 +931,19 @@ class WebSocketHandler:
                     await websocket.send_text(
                         json.dumps({"type": "control", "text": "mic-audio-end"})
                     )
+                    if self.asr_stream_active.get(client_uid):
+                        await self._feed_asr_stream(
+                            websocket,
+                            client_uid,
+                            np.array([], dtype=np.float32),
+                            is_final=True,
+                        )
+            if self.asr_stream_active.get(client_uid):
+                await self._feed_asr_stream(
+                    websocket,
+                    client_uid,
+                    np.array(chunk, dtype=np.float32),
+                )
 
     async def _handle_kws_audio_frame(
         self,
@@ -930,6 +953,7 @@ class WebSocketHandler:
         audio_session: AudioSession,
     ) -> None:
         samples = np.array(data.get("audio", []), dtype=np.float32)
+        finalized_stream = False
         for event in audio_session.accept_frame(samples):
             if event.type == "wakeup":
                 self._cancel_kws_timeout_task(client_uid)
@@ -957,6 +981,8 @@ class WebSocketHandler:
                     source="client-ws",
                 )
             elif event.type == "speech-start":
+                self._reset_asr_stream(client_uid)
+                self.asr_stream_active[client_uid] = True
                 self._cancel_kws_timeout_task(client_uid)
                 await self._send_user_speech_state(
                     websocket,
@@ -994,6 +1020,7 @@ class WebSocketHandler:
             elif event.type == "utterance" and event.audio is not None:
                 self._cancel_kws_timeout_task(client_uid)
                 if not self._is_valid_utterance_audio(event.audio, client_uid, "kws"):
+                    self._reset_asr_stream(client_uid)
                     await self._send_user_speech_state(
                         websocket,
                         client_uid,
@@ -1001,6 +1028,14 @@ class WebSocketHandler:
                         "speech-rejected",
                     )
                     continue
+                if self.asr_stream_active.get(client_uid):
+                    await self._feed_asr_stream(
+                        websocket,
+                        client_uid,
+                        np.array([], dtype=np.float32),
+                        is_final=True,
+                    )
+                    finalized_stream = True
                 audio_session.mark_processing()
                 self.received_data_buffers[client_uid] = event.audio
                 await self._handle_conversation_trigger(
@@ -1026,6 +1061,10 @@ class WebSocketHandler:
                     reason="timeout",
                     source="client-ws",
                 )
+                self._reset_asr_stream(client_uid)
+
+        if self.asr_stream_active.get(client_uid) and not finalized_stream:
+            await self._feed_asr_stream(websocket, client_uid, samples)
 
     def _is_valid_utterance_audio(
         self, audio: np.ndarray, client_uid: str, source: str
@@ -1087,6 +1126,79 @@ class WebSocketHandler:
             phase=phase,
             source="client-ws",
         )
+
+    def _reset_asr_stream(self, client_uid: str) -> None:
+        self.asr_stream_active[client_uid] = False
+        self.asr_stream_buffers[client_uid] = np.array([], dtype=np.float32)
+        context = self.client_contexts.get(client_uid)
+        asr_engine = getattr(context, "asr_engine", None) if context else None
+        reset_streaming_session = getattr(asr_engine, "reset_streaming_session", None)
+        if callable(reset_streaming_session):
+            reset_streaming_session(client_uid)
+
+    async def _feed_asr_stream(
+        self,
+        websocket: WebSocket,
+        client_uid: str,
+        audio: np.ndarray,
+        *,
+        is_final: bool = False,
+    ) -> None:
+        context = self.client_contexts.get(client_uid)
+        asr_engine = getattr(context, "asr_engine", None) if context else None
+        if not getattr(asr_engine, "supports_streaming", False):
+            return
+
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+        if audio.size == 0 and not is_final:
+            return
+
+        current = self.asr_stream_buffers.get(
+            client_uid, np.array([], dtype=np.float32)
+        )
+        if audio.size:
+            current = np.append(current, audio)
+
+        chunk_samples = int(getattr(asr_engine, "SAMPLE_RATE", 16000) * 0.6)
+        if not is_final and current.size < chunk_samples:
+            self.asr_stream_buffers[client_uid] = current
+            return
+
+        self.asr_stream_buffers[client_uid] = np.array([], dtype=np.float32)
+        try:
+            results = await asr_engine.async_streaming_transcribe_np(
+                client_uid,
+                current,
+                is_final=is_final,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Streaming ASR chunk failed: client_uid={} final={} error={}",
+                client_uid,
+                is_final,
+                exc,
+            )
+            if is_final:
+                self._reset_asr_stream(client_uid)
+            return
+
+        for result in results:
+            text = result.text.strip()
+            if not text:
+                continue
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "user-input-transcription-stream",
+                        "text": text,
+                        "is_final": result.is_final,
+                    }
+                )
+            )
+
+        if is_final:
+            self.asr_stream_active[client_uid] = False
 
     async def _handle_conversation_trigger(
         self, websocket: WebSocket, client_uid: str, data: WSMessage

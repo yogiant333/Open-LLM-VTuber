@@ -19,6 +19,8 @@ export interface BackendMessage {
   text?: string;
   message?: string;
   success?: boolean;
+  is_final?: boolean;
+  rejected?: boolean;
   client_uid?: string;
   history_uid?: string;
 }
