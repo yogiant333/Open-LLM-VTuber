@@ -78,3 +78,13 @@ downloads/
 mcp_servers.json
 
 .vscode/
+
+# Local tool/runtime state
+.certs/
+.claude/
+.omx/
+.playwright-mcp/
+
+# Local/private voice and media assets
+assets/voice_prompts/
+doc/黑神话/
