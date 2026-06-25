@@ -1,4 +1,4 @@
-import { BarChart3, Clock3, Keyboard, MessageSquareX, Mic, MicOff, PlugZap, Radio, RotateCcw, Send, Square, Wifi, WifiOff } from "lucide-react";
+import { BarChart3, Clock3, Keyboard, MessageSquareX, Mic, MicOff, PlugZap, RotateCcw, Send, Square } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LiveTalkingClient } from "./livetalking";
 import type { BackendMessage, ChatLine, ConnectionState } from "./types";
@@ -41,25 +41,6 @@ function getStatusLabel(state: ConnectionState) {
     ready: "待命",
     thinking: "生成中",
     speaking: "讲解中",
-    error: "异常",
-  };
-  return labels[state];
-}
-
-function getStatusClass(state: ConnectionState) {
-  if (state === "ready" || state === "speaking") return "is-good";
-  if (state === "connecting" || state === "thinking") return "is-warn";
-  if (state === "error") return "is-bad";
-  return "is-muted";
-}
-
-function getMicStatusLabel(state: ConnectionState) {
-  const labels: Record<ConnectionState, string> = {
-    disconnected: "未启用",
-    connecting: "请求中",
-    ready: "已启用",
-    thinking: "请求中",
-    speaking: "已启用",
     error: "异常",
   };
   return labels[state];
@@ -984,21 +965,6 @@ export function App() {
             <p>{userTranscript}</p>
           </div>
         )}
-
-        <div className="overlay-status">
-          <span className={`status-dot ${getStatusClass(state)}`}>
-            <Radio size={12} />
-            数字人 {getStatusLabel(state)}
-          </span>
-          <span className={`status-dot ${getStatusClass(backendState)}`}>
-            {backendState === "ready" ? <Wifi size={12} /> : <WifiOff size={12} />}
-            后端 {getStatusLabel(backendState)}
-          </span>
-          <span className={`status-dot ${getStatusClass(micState)}`}>
-            {micState === "ready" ? <Mic size={12} /> : <MicOff size={12} />}
-            麦克风 {getMicStatusLabel(micState)}
-          </span>
-        </div>
 
         <div className="volume-meter" aria-label="麦克风音量">
           <span>MIC</span>

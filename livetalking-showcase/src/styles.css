@@ -373,11 +373,12 @@ button {
   width: 33.333%;
   min-width: 0;
   max-height: 36vh;
-  padding: 8px 9px;
+  padding: 10px 12px 12px;
   overflow: hidden;
   border-color: rgba(32, 214, 199, 0.28);
   border-radius: 8px;
   background: rgba(0, 10, 12, 0.28);
+  box-sizing: border-box;
 }
 
 .answer-float span {
@@ -390,10 +391,14 @@ button {
   display: grid;
   gap: 14px;
   margin-top: 6px;
-  max-height: calc(36vh - 30px);
+  max-height: calc(36vh - 34px);
   min-width: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+  padding-right: 4px;
+  padding-bottom: 8px;
   scroll-behavior: smooth;
+  scrollbar-gutter: stable;
   scrollbar-width: thin;
 }
 
@@ -424,12 +429,14 @@ button {
   width: 33.333%;
   min-width: 0;
   max-height: min(22vh, 180px);
-  padding: 7px 9px;
+  padding: 8px 12px 10px;
   overflow-y: auto;
   border-radius: 8px;
   background: rgba(0, 10, 12, 0.26);
   backdrop-filter: blur(10px);
+  box-sizing: border-box;
   scroll-behavior: smooth;
+  scrollbar-gutter: stable;
   scrollbar-width: thin;
 }
 
@@ -441,6 +448,8 @@ button {
 
 .user-transcript p {
   margin: 4px 0 0;
+  padding-right: 3px;
+  padding-bottom: 4px;
   color: #f9fffb;
   font-size: 10px;
   font-weight: 700;
