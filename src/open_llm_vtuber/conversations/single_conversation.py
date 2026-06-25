@@ -19,10 +19,22 @@ from .types import WebSocketSend
 from .tts_manager import TTSTaskManager
 from ..chat_history_manager import store_message
 from ..service_context import ServiceContext
+from ..utils.llm_context_audit import sanitize_for_audit, write_llm_context_audit
 
 # Import necessary types from agent outputs
 from ..agent.output_types import SentenceOutput, AudioOutput
 from ..ue_avatar_protocol import send_question
+
+
+def _agent_memory_snapshot(context: ServiceContext) -> list[dict[str, Any]]:
+    memory = getattr(context.agent_engine, "_memory", [])
+    if not isinstance(memory, list):
+        return []
+    return sanitize_for_audit(memory)
+
+
+def _agent_system_prompt(context: ServiceContext) -> str:
+    return str(getattr(context.agent_engine, "_system", ""))
 
 
 async def process_single_conversation(
@@ -60,6 +72,9 @@ async def process_single_conversation(
     # Create TTSTaskManager for this conversation
     tts_manager = TTSTaskManager(username=client_uid, timing_context=timing_context)
     full_response = ""  # Initialize full_response here
+    input_text: Union[str, List[str], None] = None
+    tool_events: List[Dict[str, Any]] = []
+    audit_started = False
 
     try:
         # Send initial signals
@@ -135,6 +150,26 @@ async def process_single_conversation(
         if images:
             logger.info(f"With {len(images)} images")
 
+        write_llm_context_audit(
+            "llm_turn_start",
+            {
+                "turn_id": timing_context["turn_id"],
+                "client_uid": client_uid,
+                "history_uid": context.history_uid,
+                "conf_uid": context.character_config.conf_uid,
+                "character_name": context.character_config.character_name,
+                "human_name": context.character_config.human_name,
+                "session_emoji": session_emoji,
+                "input_type": "audio" if isinstance(user_input, np.ndarray) else "text",
+                "user_input": input_text,
+                "metadata": metadata or {},
+                "images_count": len(images or []),
+                "system_prompt": _agent_system_prompt(context),
+                "memory_before": _agent_memory_snapshot(context),
+            },
+        )
+        audit_started = True
+
         try:
             # agent.chat yields Union[SentenceOutput, Dict[str, Any]]
             agent_output_stream = context.agent_engine.chat(batch_input)
@@ -147,6 +182,7 @@ async def process_single_conversation(
                     # Handle tool status event: send WebSocket message
                     output_item["name"] = context.character_config.character_name
                     logger.debug(f"Sending tool status update: {output_item}")
+                    tool_events.append(sanitize_for_audit(output_item))
 
                     await websocket_send(json.dumps(output_item))
 
@@ -188,6 +224,19 @@ async def process_single_conversation(
             logger.exception(
                 f"Error processing agent response stream: {e}"
             )  # Log with stack trace
+            if audit_started:
+                write_llm_context_audit(
+                    "llm_turn_error",
+                    {
+                        "turn_id": timing_context["turn_id"],
+                        "client_uid": client_uid,
+                        "history_uid": context.history_uid,
+                        "error": str(e),
+                        "partial_response": full_response,
+                        "tool_events": tool_events,
+                        "memory_after_error": _agent_memory_snapshot(context),
+                    },
+                )
             await websocket_send(
                 json.dumps(
                     {
@@ -230,13 +279,59 @@ async def process_single_conversation(
             )
             logger.info(f"AI response: {full_response}")
 
+        if audit_started:
+            write_llm_context_audit(
+                "llm_turn_end",
+                {
+                    "turn_id": timing_context["turn_id"],
+                    "client_uid": client_uid,
+                    "history_uid": context.history_uid,
+                    "user_input": input_text,
+                    "full_response": full_response,
+                    "tool_events": tool_events,
+                    "memory_after": _agent_memory_snapshot(context),
+                    "elapsed_ms": (time.perf_counter_ns() - turn_started_ns)
+                    / 1_000_000,
+                },
+            )
+
         return full_response  # Return accumulated full_response
 
     except asyncio.CancelledError:
         logger.info(f"🤡👍 Conversation {session_emoji} cancelled because interrupted.")
+        if audit_started:
+            write_llm_context_audit(
+                "llm_turn_cancelled",
+                {
+                    "turn_id": timing_context["turn_id"],
+                    "client_uid": client_uid,
+                    "history_uid": context.history_uid,
+                    "user_input": input_text,
+                    "partial_response": full_response,
+                    "tool_events": tool_events,
+                    "memory_after_cancel": _agent_memory_snapshot(context),
+                    "elapsed_ms": (time.perf_counter_ns() - turn_started_ns)
+                    / 1_000_000,
+                },
+            )
         raise
     except Exception as e:
         logger.error(f"Error in conversation chain: {e}")
+        if audit_started:
+            write_llm_context_audit(
+                "llm_turn_error",
+                {
+                    "turn_id": timing_context["turn_id"],
+                    "client_uid": client_uid,
+                    "history_uid": context.history_uid,
+                    "error": str(e),
+                    "partial_response": full_response,
+                    "tool_events": tool_events,
+                    "memory_after_error": _agent_memory_snapshot(context),
+                    "elapsed_ms": (time.perf_counter_ns() - turn_started_ns)
+                    / 1_000_000,
+                },
+            )
         await websocket_send(
             json.dumps({"type": "error", "message": f"Conversation error: {str(e)}"})
         )

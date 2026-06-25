@@ -126,6 +126,8 @@ button {
 .wake-caption,
 .answer-float,
 .keyboard-panel,
+.webrtc-stats-panel,
+.stats-toggle,
 .status-dot,
 .session-watermark {
   border: 0;
@@ -159,6 +161,71 @@ button {
   color: #fff;
   font-size: 15px;
   letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.webrtc-stats-wrap {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.stats-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  color: #dffefd;
+  border-radius: 8px;
+}
+
+.stats-toggle.is-active {
+  color: #20d6c7;
+  background: rgba(0, 46, 44, 0.52);
+}
+
+.webrtc-stats-panel {
+  width: 172px;
+  padding: 10px;
+  color: #f7ffff;
+  border-radius: 8px;
+  background: rgba(0, 10, 12, 0.34);
+}
+
+.webrtc-stats-panel strong {
+  display: block;
+  margin-bottom: 7px;
+  color: #20d6c7;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.webrtc-stats-panel dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 9px;
+  margin: 0;
+}
+
+.webrtc-stats-panel div {
+  min-width: 0;
+}
+
+.webrtc-stats-panel dt {
+  color: rgba(255, 255, 255, 0.54);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.webrtc-stats-panel dd {
+  margin: 1px 0 0;
+  overflow: hidden;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

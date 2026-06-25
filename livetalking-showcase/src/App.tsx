@@ -1,4 +1,4 @@
-import { Clock3, Keyboard, MessageSquareX, Mic, MicOff, PlugZap, Radio, RotateCcw, Send, Square, Wifi, WifiOff } from "lucide-react";
+import { BarChart3, Clock3, Keyboard, MessageSquareX, Mic, MicOff, PlugZap, Radio, RotateCcw, Send, Square, Wifi, WifiOff } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LiveTalkingClient } from "./livetalking";
 import type { BackendMessage, ChatLine, ConnectionState } from "./types";
@@ -94,6 +94,37 @@ interface PlaybackTask {
   displayText?: BackendMessage["display_text"];
   text: string;
 }
+
+interface WebRtcStatsSnapshot {
+  resolution: string;
+  fps: string;
+  bitrateKbps: string;
+  packetsLost: string;
+  packetsReceived: string;
+  jitterMs: string;
+  roundTripMs: string;
+  framesDecoded: string;
+  freezeCount: string;
+  qp: string;
+}
+
+interface WebRtcStatsSample {
+  bytesReceived: number;
+  timestamp: number;
+}
+
+const EMPTY_WEBRTC_STATS: WebRtcStatsSnapshot = {
+  resolution: "-",
+  fps: "-",
+  bitrateKbps: "-",
+  packetsLost: "-",
+  packetsReceived: "-",
+  jitterMs: "-",
+  roundTripMs: "-",
+  framesDecoded: "-",
+  freezeCount: "-",
+  qp: "-",
+};
 
 function wait(ms: number) {
   return new Promise<void>((resolve) => {
@@ -207,6 +238,8 @@ export function App() {
   const playbackQueueRef = useRef<PlaybackTask[]>([]);
   const isPlaybackQueueRunningRef = useRef(false);
   const backendSynthCompleteRef = useRef(false);
+  const playbackGenerationRef = useRef(0);
+  const previousStatsSampleRef = useRef<WebRtcStatsSample | null>(null);
   const [time, setTime] = useState(nowTime);
   const [state, setState] = useState<ConnectionState>("disconnected");
   const [statusMessage, setStatusMessage] = useState("正在等待连接数字人服务");
@@ -217,6 +250,8 @@ export function App() {
   const [subtitle, setSubtitle] = useState(WAKE_TEXT);
   const [answerText, setAnswerText] = useState(INITIAL_ANSWER_TEXT);
   const [answerEntries, setAnswerEntries] = useState<AnswerEntry[]>([]);
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const [webRtcStats, setWebRtcStats] = useState<WebRtcStatsSnapshot>(EMPTY_WEBRTC_STATS);
   const [question, setQuestion] = useState("");
   const [isInputOpen, setIsInputOpen] = useState(false);
   const [chatLines, setChatLines] = useState<ChatLine[]>([
@@ -234,6 +269,68 @@ export function App() {
 
   const appendLine = useCallback((role: ChatLine["role"], text: string) => {
     setChatLines((current) => [makeLine(role, text), ...current].slice(0, 7));
+  }, []);
+
+  const refreshWebRtcStats = useCallback(async () => {
+    const statsReport = await liveTalkingRef.current?.getStats();
+    if (!statsReport) {
+      setWebRtcStats(EMPTY_WEBRTC_STATS);
+      previousStatsSampleRef.current = null;
+      return;
+    }
+
+    let inboundVideo: RTCInboundRtpStreamStats | undefined;
+    let selectedPair: RTCIceCandidatePairStats | undefined;
+    statsReport.forEach((report) => {
+      if (report.type === "inbound-rtp" && report.kind === "video") {
+        inboundVideo = report as RTCInboundRtpStreamStats;
+      }
+      if (report.type === "candidate-pair" && report.state === "succeeded" && report.nominated) {
+        selectedPair = report as RTCIceCandidatePairStats;
+      }
+    });
+
+    if (!inboundVideo) {
+      setWebRtcStats(EMPTY_WEBRTC_STATS);
+      previousStatsSampleRef.current = null;
+      return;
+    }
+
+    const bytesReceived = inboundVideo.bytesReceived ?? 0;
+    const timestamp = inboundVideo.timestamp;
+    const previous = previousStatsSampleRef.current;
+    let bitrateKbps = "-";
+    if (previous && timestamp > previous.timestamp) {
+      const deltaBytes = bytesReceived - previous.bytesReceived;
+      const deltaSeconds = (timestamp - previous.timestamp) / 1000;
+      bitrateKbps = Math.max(0, Math.round((deltaBytes * 8) / deltaSeconds / 1000)).toString();
+    }
+    previousStatsSampleRef.current = { bytesReceived, timestamp };
+
+    const frameWidth = inboundVideo.frameWidth;
+    const frameHeight = inboundVideo.frameHeight;
+    const framesDecoded = inboundVideo.framesDecoded ?? 0;
+    const qpSum = inboundVideo.qpSum;
+    const extendedInboundVideo = inboundVideo as RTCInboundRtpStreamStats & {
+      freezeCount?: number;
+    };
+    const avgQp = qpSum && framesDecoded ? Math.round(qpSum / framesDecoded).toString() : "-";
+
+    setWebRtcStats({
+      resolution: frameWidth && frameHeight ? `${frameWidth}x${frameHeight}` : "-",
+      fps: typeof inboundVideo.framesPerSecond === "number" ? inboundVideo.framesPerSecond.toFixed(1) : "-",
+      bitrateKbps,
+      packetsLost: String(inboundVideo.packetsLost ?? "-"),
+      packetsReceived: String(inboundVideo.packetsReceived ?? "-"),
+      jitterMs: typeof inboundVideo.jitter === "number" ? Math.round(inboundVideo.jitter * 1000).toString() : "-",
+      roundTripMs:
+        selectedPair && typeof selectedPair.currentRoundTripTime === "number"
+          ? Math.round(selectedPair.currentRoundTripTime * 1000).toString()
+          : "-",
+      framesDecoded: String(framesDecoded || "-"),
+      freezeCount: String(extendedInboundVideo.freezeCount ?? "-"),
+      qp: avgQp,
+    });
   }, []);
 
   const resetAnswerDraft = useCallback(() => {
@@ -295,8 +392,12 @@ export function App() {
     }
 
     isPlaybackQueueRunningRef.current = true;
+    const playbackGeneration = playbackGenerationRef.current;
     try {
-      while (playbackQueueRef.current.length > 0) {
+      while (
+        playbackGenerationRef.current === playbackGeneration &&
+        playbackQueueRef.current.length > 0
+      ) {
         const task = playbackQueueRef.current.shift();
         const client = liveTalkingRef.current;
         if (!task || !client?.getSessionId()) {
@@ -318,9 +419,15 @@ export function App() {
           await client.sendAudio(task.audio);
           const durationMs = getWavDurationMs(task.audio);
           await wait(durationMs + 900);
+          if (playbackGenerationRef.current !== playbackGeneration) {
+            break;
+          }
           setState("ready");
           setStatusMessage("数字人已待命");
         } catch (error) {
+          if (playbackGenerationRef.current !== playbackGeneration) {
+            break;
+          }
           const errorMessage = error instanceof Error ? error.message : String(error);
           setState("error");
           setStatusMessage(errorMessage);
@@ -328,10 +435,37 @@ export function App() {
         }
       }
     } finally {
-      isPlaybackQueueRunningRef.current = false;
-      notifyPlaybackCompleteIfReady();
+      if (playbackGenerationRef.current === playbackGeneration) {
+        isPlaybackQueueRunningRef.current = false;
+        notifyPlaybackCompleteIfReady();
+      }
     }
   }, [appendLine, notifyPlaybackCompleteIfReady]);
+
+  const stopCurrentPlayback = useCallback(
+    async (sendBackendInterrupt: boolean) => {
+      if (sendBackendInterrupt) {
+        websocketRef.current?.send(JSON.stringify({ type: "interrupt-signal" }));
+      }
+
+      playbackGenerationRef.current += 1;
+      playbackQueueRef.current = [];
+      backendSynthCompleteRef.current = false;
+      websocketRef.current?.send(JSON.stringify({ type: "frontend-playback-complete" }));
+
+      try {
+        await liveTalkingRef.current?.interrupt();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        appendLine("system", `LiveTalking 打断失败：${message}`);
+      }
+
+      isPlaybackQueueRunningRef.current = false;
+      setState("ready");
+      setStatusMessage("已打断当前讲解");
+    },
+    [appendLine],
+  );
 
   const stopMicrophone = useCallback(() => {
     const capture = micCaptureRef.current;
@@ -585,6 +719,9 @@ export function App() {
         if (message.text === "mic-audio-end") {
           setIsAwake(true);
         }
+        if (message.text === "interrupt") {
+          stopCurrentPlayback(false).catch(() => undefined);
+        }
         if (message.text === "wakeup-detected") {
           setIsAwake(true);
           setSubtitle("我在，请说。");
@@ -612,6 +749,7 @@ export function App() {
     processPlaybackQueue,
     resetAnswerDraft,
     startMicrophone,
+    stopCurrentPlayback,
   ]);
 
   useEffect(() => {
@@ -641,6 +779,21 @@ export function App() {
     }, 80);
   }, [answerEntries]);
 
+  useEffect(() => {
+    if (!isStatsOpen) {
+      return;
+    }
+
+    refreshWebRtcStats().catch(() => undefined);
+    const intervalId = window.setInterval(() => {
+      refreshWebRtcStats().catch(() => undefined);
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isStatsOpen, refreshWebRtcStats]);
+
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     const text = question.trim();
@@ -663,20 +816,11 @@ export function App() {
   };
 
   const handleInterrupt = async () => {
-    websocketRef.current?.send(JSON.stringify({ type: "interrupt-signal" }));
-    try {
-      await liveTalkingRef.current?.interrupt();
-      setState("ready");
-      setStatusMessage("已打断当前讲解");
-      setIsAwake(false);
-      setSubtitle(WAKE_TEXT);
-      activeAnswerIdRef.current = "";
-      appendLine("system", "已执行打断。");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setState("error");
-      setStatusMessage(message);
-    }
+    await stopCurrentPlayback(true);
+    setIsAwake(false);
+    setSubtitle(WAKE_TEXT);
+    activeAnswerIdRef.current = "";
+    appendLine("system", "已执行打断。");
   };
 
   const handleClearConversation = () => {
@@ -705,6 +849,62 @@ export function App() {
             <Clock3 size={14} />
             <span>{nowDate()}</span>
             <strong>{time}</strong>
+          </div>
+          <div className="webrtc-stats-wrap">
+            <button
+              className={`stats-toggle ${isStatsOpen ? "is-active" : ""}`}
+              title="WebRTC 实时统计"
+              onClick={() => setIsStatsOpen((current) => !current)}
+            >
+              <BarChart3 size={15} />
+            </button>
+            {isStatsOpen && (
+              <div className="webrtc-stats-panel">
+                <strong>WebRTC</strong>
+                <dl>
+                  <div>
+                    <dt>RES</dt>
+                    <dd>{webRtcStats.resolution}</dd>
+                  </div>
+                  <div>
+                    <dt>FPS</dt>
+                    <dd>{webRtcStats.fps}</dd>
+                  </div>
+                  <div>
+                    <dt>KBPS</dt>
+                    <dd>{webRtcStats.bitrateKbps}</dd>
+                  </div>
+                  <div>
+                    <dt>RTT</dt>
+                    <dd>{webRtcStats.roundTripMs}ms</dd>
+                  </div>
+                  <div>
+                    <dt>JIT</dt>
+                    <dd>{webRtcStats.jitterMs}ms</dd>
+                  </div>
+                  <div>
+                    <dt>LOSS</dt>
+                    <dd>{webRtcStats.packetsLost}</dd>
+                  </div>
+                  <div>
+                    <dt>PKT</dt>
+                    <dd>{webRtcStats.packetsReceived}</dd>
+                  </div>
+                  <div>
+                    <dt>FRM</dt>
+                    <dd>{webRtcStats.framesDecoded}</dd>
+                  </div>
+                  <div>
+                    <dt>QP</dt>
+                    <dd>{webRtcStats.qp}</dd>
+                  </div>
+                  <div>
+                    <dt>FRZ</dt>
+                    <dd>{webRtcStats.freezeCount}</dd>
+                  </div>
+                </dl>
+              </div>
+            )}
           </div>
         </header>
 

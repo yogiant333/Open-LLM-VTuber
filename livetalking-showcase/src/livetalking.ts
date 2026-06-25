@@ -3,11 +3,16 @@ import type { LiveTalkingConfig, OfferResponse } from "./types";
 export class LiveTalkingClient {
   private peerConnection: RTCPeerConnection | null = null;
   private sessionId: string | null = null;
+  private audioAbortController: AbortController | null = null;
 
   constructor(private readonly config: LiveTalkingConfig) {}
 
   getSessionId() {
     return this.sessionId;
+  }
+
+  async getStats() {
+    return this.peerConnection?.getStats() ?? null;
   }
 
   async connect(onStream: (stream: MediaStream) => void) {
@@ -71,12 +76,22 @@ export class LiveTalkingClient {
     formData.append("sessionid", this.sessionId);
     formData.append("file", base64WavToBlob(audioBase64), "reply.wav");
 
-    const response = await fetch(`${this.config.serviceUrl}/humanaudio`, {
-      method: "POST",
-      body: formData,
-    });
+    this.audioAbortController?.abort();
+    const abortController = new AbortController();
+    this.audioAbortController = abortController;
 
-    await parseLiveTalkingResponse(response, "/humanaudio");
+    try {
+      const response = await fetch(`${this.config.serviceUrl}/humanaudio`, {
+        method: "POST",
+        body: formData,
+        signal: abortController.signal,
+      });
+      await parseLiveTalkingResponse(response, "/humanaudio");
+    } finally {
+      if (this.audioAbortController === abortController) {
+        this.audioAbortController = null;
+      }
+    }
   }
 
   async interrupt() {
@@ -84,13 +99,29 @@ export class LiveTalkingClient {
       return;
     }
 
-    const response = await fetch(`${this.config.serviceUrl}/interrupt_talk`, {
+    this.audioAbortController?.abort();
+    this.audioAbortController = null;
+
+    const jsonResponse = await fetch(`${this.config.serviceUrl}/interrupt_talk`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionid: this.sessionId }),
     });
 
-    await parseLiveTalkingResponse(response, "/interrupt_talk");
+    try {
+      await parseLiveTalkingResponse(jsonResponse, "/interrupt_talk");
+      return;
+    } catch {
+      // Some LiveTalking forks accept interrupt_talk only as multipart form data.
+    }
+
+    const formData = new FormData();
+    formData.append("sessionid", this.sessionId);
+    const formResponse = await fetch(`${this.config.serviceUrl}/interrupt_talk`, {
+      method: "POST",
+      body: formData,
+    });
+    await parseLiveTalkingResponse(formResponse, "/interrupt_talk");
   }
 
   disconnect() {
@@ -102,6 +133,8 @@ export class LiveTalkingClient {
     this.peerConnection
       .getReceivers()
       .forEach((receiver) => receiver.track?.stop());
+    this.audioAbortController?.abort();
+    this.audioAbortController = null;
     this.peerConnection.close();
     this.peerConnection = null;
     this.sessionId = null;

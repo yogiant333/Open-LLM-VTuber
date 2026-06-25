@@ -82,6 +82,7 @@ class WebSocketHandler:
         self.user_speech_active: Dict[str, bool] = {}
         self.audio_sessions: Dict[str, AudioSession] = {}
         self.kws_timeout_tasks: Dict[str, asyncio.Task] = {}
+        self.client_played_response_texts: Dict[str, str] = {}
         self._event_loop: asyncio.AbstractEventLoop | None = None
         ue_avatar_server.set_status_listener(self._publish_ue_avatar_status)
 
@@ -363,6 +364,40 @@ class WebSocketHandler:
         task = self.kws_timeout_tasks.pop(client_uid, None)
         if task and not task.done():
             task.cancel()
+
+    def _append_played_response_text(self, client_uid: str, text: str) -> None:
+        text = (text or "").strip()
+        if not text:
+            return
+
+        current = self.client_played_response_texts.get(client_uid, "").strip()
+        if not current:
+            self.client_played_response_texts[client_uid] = text
+        elif text.startswith(current):
+            self.client_played_response_texts[client_uid] = text
+        elif not current.endswith(text):
+            self.client_played_response_texts[client_uid] = f"{current}{text}"
+
+    @staticmethod
+    def _summarize_memory(context: ServiceContext) -> list[dict]:
+        memory = getattr(context.agent_engine, "_memory", [])
+        summary = []
+        for item in memory[-8:]:
+            role = item.get("role", "") if isinstance(item, dict) else ""
+            content = item.get("content", "") if isinstance(item, dict) else str(item)
+            summary.append(
+                {
+                    "role": role,
+                    "content": str(content).replace("\n", " ")[:180],
+                }
+            )
+        return summary
+
+    def _is_client_asr_transcribing(self, client_uid: str) -> bool:
+        context = self.client_contexts.get(client_uid)
+        asr_engine = getattr(context, "asr_engine", None) if context else None
+        transcribe_lock = getattr(asr_engine, "_transcribe_lock", None)
+        return bool(transcribe_lock and transcribe_lock.locked())
 
     def _schedule_kws_timeout_after_response(
         self,
@@ -669,9 +704,17 @@ class WebSocketHandler:
         self, websocket: WebSocket, client_uid: str, data: WSMessage
     ) -> None:
         """Handle conversation interruption"""
-        heard_response = data.get("text", "")
+        heard_response = data.get("text", "") or self.client_played_response_texts.get(
+            client_uid, ""
+        )
         context = self.client_contexts[client_uid]
         group = self.chat_group_manager.get_client_group(client_uid)
+        logger.info(
+            "Interrupt context before handling: client_uid={} heard_response_len={} heard_response_preview={}",
+            client_uid,
+            len(heard_response or ""),
+            (heard_response or "").replace("\n", " ")[:220],
+        )
 
         if group and len(group.members) > 1:
             await handle_group_interrupt(
@@ -689,6 +732,12 @@ class WebSocketHandler:
                 context=context,
                 heard_response=heard_response,
             )
+        logger.info(
+            "Interrupt context after handling: client_uid={} memory_tail={}",
+            client_uid,
+            self._summarize_memory(context),
+        )
+        self.client_played_response_texts.pop(client_uid, None)
 
     async def _handle_history_list_request(
         self, websocket: WebSocket, client_uid: str, data: WSMessage
@@ -759,6 +808,7 @@ class WebSocketHandler:
         self.current_conversation_tasks[client_uid] = None
         self.received_data_buffers[client_uid] = np.array([])
         self._cancel_kws_timeout_task(client_uid)
+        self.client_played_response_texts.pop(client_uid, None)
 
         audio_session = self.audio_sessions.get(client_uid)
         if audio_session:
@@ -919,6 +969,12 @@ class WebSocketHandler:
                 )
                 task = self.current_conversation_tasks.get(client_uid)
                 if task and not task.done():
+                    if self._is_client_asr_transcribing(client_uid):
+                        logger.info(
+                            "Ignoring KWS speech-start interrupt while ASR is transcribing: client_uid={}",
+                            client_uid,
+                        )
+                        continue
                     logger.info(
                         "KWS speech-start interrupts active conversation: client_uid={}",
                         client_uid,
@@ -1036,8 +1092,20 @@ class WebSocketHandler:
         self, websocket: WebSocket, client_uid: str, data: WSMessage
     ) -> None:
         """Handle triggers that start a conversation"""
+        msg_type = data.get("type", "")
+        if msg_type == "mic-audio-end" and self._is_client_asr_transcribing(client_uid):
+            logger.info(
+                "Dropping mic-audio-end while ASR is already transcribing: client_uid={}",
+                client_uid,
+            )
+            self.received_data_buffers[client_uid] = np.array([])
+            audio_session = self.audio_sessions.get(client_uid)
+            if audio_session:
+                audio_session.mark_processing()
+            return
+
         await handle_conversation_trigger(
-            msg_type=data.get("type", ""),
+            msg_type=msg_type,
             data=data,
             client_uid=client_uid,
             context=self.client_contexts[client_uid],
@@ -1094,9 +1162,19 @@ class WebSocketHandler:
         if audio_session:
             audio_session.mark_speaking()
 
+        display_text = data.get("display_text")
+        if display_text:
+            played_text = str(display_text.get("text", "")).strip()
+            self._append_played_response_text(client_uid, played_text)
+            logger.info(
+                "Tracked played response text: client_uid={} total_len={} chunk_preview={}",
+                client_uid,
+                len(self.client_played_response_texts.get(client_uid, "")),
+                played_text.replace("\n", " ")[:160],
+            )
+
         group_members = self.chat_group_manager.get_group_members(client_uid)
         if len(group_members) > 1:
-            display_text = data.get("display_text")
             if display_text:
                 silent_payload = prepare_audio_payload(
                     audio_path=None,
@@ -1111,6 +1189,7 @@ class WebSocketHandler:
     async def _handle_frontend_playback_complete(
         self, websocket: WebSocket, client_uid: str, data: WSMessage
     ) -> None:
+        self.client_played_response_texts.pop(client_uid, None)
         audio_session = self.audio_sessions.get(client_uid)
         if audio_session:
             audio_session.mark_awake_after_response()
