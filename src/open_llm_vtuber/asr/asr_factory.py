@@ -6,12 +6,16 @@ def _normalize_hotwords(hotwords: list[str] | None) -> list[str]:
     return [word.strip() for word in hotwords or [] if word and word.strip()]
 
 
-def _merge_prompt_with_hotwords(prompt: str | None, hotwords: list[str] | None) -> str | None:
+def _merge_prompt_with_hotwords(
+    prompt: str | None, hotwords: list[str] | None
+) -> str | None:
     words = _normalize_hotwords(hotwords)
     if not words:
         return prompt
 
-    hotwords_prompt = "识别时请优先保留这些专有名词和领域词，不要改写：" + "、".join(words) + "。"
+    hotwords_prompt = (
+        "识别时请优先保留这些专有名词和领域词，不要改写：" + "、".join(words) + "。"
+    )
     if prompt:
         return f"{prompt}\n{hotwords_prompt}"
     return hotwords_prompt
@@ -105,5 +109,9 @@ class ASRFactory:
             from .qwen3_asr_gguf import VoiceRecognition as Qwen3ASRGGUF
 
             return Qwen3ASRGGUF(**kwargs)
+        elif system_name == "fun_asr_gguf":
+            from .fun_asr_gguf import VoiceRecognition as FunASRGGUF
+
+            return FunASRGGUF(**kwargs)
         else:
             raise ValueError(f"Unknown ASR system: {system_name}")

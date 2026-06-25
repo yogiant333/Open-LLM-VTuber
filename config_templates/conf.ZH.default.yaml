@@ -195,7 +195,7 @@ character_config:
 
   # === 自动语音识别 ===
   asr_config:
-    # 语音转文本模型选项：'faster_whisper', 'whisper_cpp', 'whisper', 'azure_asr', 'fun_asr', 'groq_whisper_asr', 'sherpa_onnx_asr'
+    # 语音转文本模型选项：'faster_whisper', 'whisper_cpp', 'whisper', 'azure_asr', 'fun_asr', 'fun_asr_gguf', 'groq_whisper_asr', 'sherpa_onnx_asr', 'qwen3_asr', 'qwen3_asr_gguf'
     asr_model: 'sherpa_onnx_asr' # 使用的语音识别模型
 
     azure_asr:
@@ -245,6 +245,40 @@ character_config:
       streaming_chunk_size: [0, 10, 5] # 约 600ms chunk，参考 FunASR 官方示例
       encoder_chunk_look_back: 4
       decoder_chunk_look_back: 1
+
+    # HaujetZhao/Fun-ASR-GGUF，本地 ONNX + GGUF 离线版本
+    # 需要把模型文件放入 Fun-ASR-GGUF/model，并把 llama.cpp 动态库放入 Fun-ASR-GGUF/fun_asr_gguf/inference/bin
+    fun_asr_gguf:
+      working_dir: 'Fun-ASR-GGUF'
+      runtime_dir: 'Fun-ASR-GGUF/model'
+      model_dir: 'Fun-ASR-GGUF/model/model'
+      encoder_onnx: 'Fun-ASR-Nano-Encoder-Adaptor.fp32.onnx'
+      ctc_onnx: 'Fun-ASR-Nano-CTC.int8.onnx'
+      decoder_gguf: 'Fun-ASR-Nano-Decoder.q8_0.gguf'
+      tokens: 'tokens.txt'
+      hotwords_path: 'Fun-ASR-GGUF/hot.txt'
+      language: '中文'
+      context: '请严格逐字转写音频中的原话，不要润色、不要改写、不要补全、不要总结。'
+      enable_ctc: True
+      onnx_provider: 'DML' # Windows 推荐 DML；也可用 CPU/CUDA/TensorRT
+      llm_use_gpu: True # 使用 llama.cpp GPU 后端
+      vulkan_force_fp32: False
+      n_predict: 512
+      n_threads:
+      n_threads_batch:
+      n_ubatch: 512
+      similar_threshold: 0.6
+      max_hotwords: 10
+      ctc_topk: 20
+      dml_pad_to: 30
+      temperature: 0.4
+      top_p: 1.0
+      top_k: 50
+      streaming_enabled: True
+      streaming_partial_mode: 'ctc' # ctc=增量显示；none=只在一句话结束后显示最终识别结果
+      streaming_min_audio_ms: 800
+      streaming_update_ms: 600
+      verbose: False
 
     # pip install sherpa-onnx
     # 文档：https://k2-fsa.github.io/sherpa/onnx/index.html

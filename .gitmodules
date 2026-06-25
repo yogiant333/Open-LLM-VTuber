@@ -5,3 +5,6 @@
 [submodule "Qwen3-ASR-GGUF"]
 	path = Qwen3-ASR-GGUF
 	url = https://github.com/HaujetZhao/Qwen3-ASR-GGUF
+[submodule "Fun-ASR-GGUF"]
+	path = Fun-ASR-GGUF
+	url = https://github.com/HaujetZhao/Fun-ASR-GGUF

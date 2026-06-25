@@ -172,7 +172,7 @@ character_config:
 
   # === Automatic Speech Recognition ===
   asr_config:
-    # speech to text model options: 'faster_whisper', 'whisper_cpp', 'whisper', 'azure_asr', 'fun_asr', 'groq_whisper_asr', 'sherpa_onnx_asr'
+    # speech to text model options: 'faster_whisper', 'whisper_cpp', 'whisper', 'azure_asr', 'fun_asr', 'fun_asr_gguf', 'groq_whisper_asr', 'sherpa_onnx_asr', 'qwen3_asr', 'qwen3_asr_gguf'
     asr_model: 'sherpa_onnx_asr'
 
     azure_asr:
@@ -223,6 +223,40 @@ character_config:
       streaming_chunk_size: [0, 10, 5] # about 600ms chunks, matching FunASR's streaming example
       encoder_chunk_look_back: 4
       decoder_chunk_look_back: 1
+
+    # HaujetZhao/Fun-ASR-GGUF local ONNX + GGUF offline runtime.
+    # Put model files under Fun-ASR-GGUF/model and llama.cpp dynamic libraries under Fun-ASR-GGUF/fun_asr_gguf/inference/bin.
+    fun_asr_gguf:
+      working_dir: 'Fun-ASR-GGUF'
+      runtime_dir: 'Fun-ASR-GGUF/model'
+      model_dir: 'Fun-ASR-GGUF/model/model'
+      encoder_onnx: 'Fun-ASR-Nano-Encoder-Adaptor.fp32.onnx'
+      ctc_onnx: 'Fun-ASR-Nano-CTC.int8.onnx'
+      decoder_gguf: 'Fun-ASR-Nano-Decoder.q8_0.gguf'
+      tokens: 'tokens.txt'
+      hotwords_path: 'Fun-ASR-GGUF/hot.txt'
+      language: '中文'
+      context: '请严格逐字转写音频中的原话，不要润色、不要改写、不要补全、不要总结。'
+      enable_ctc: True
+      onnx_provider: 'DML' # Use DML on Windows, or CPU/CUDA/TensorRT.
+      llm_use_gpu: True # Use llama.cpp GPU backend.
+      vulkan_force_fp32: False
+      n_predict: 512
+      n_threads:
+      n_threads_batch:
+      n_ubatch: 512
+      similar_threshold: 0.6
+      max_hotwords: 10
+      ctc_topk: 20
+      dml_pad_to: 30
+      temperature: 0.4
+      top_p: 1.0
+      top_k: 50
+      streaming_enabled: True
+      streaming_partial_mode: 'ctc' # ctc=partial text; none=only show final text after utterance end.
+      streaming_min_audio_ms: 800
+      streaming_update_ms: 600
+      verbose: False
 
     # pip install sherpa-onnx
     # documentation: https://k2-fsa.github.io/sherpa/onnx/index.html

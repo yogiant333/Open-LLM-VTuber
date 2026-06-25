@@ -351,19 +351,137 @@ class Qwen3ASRGGUFConfig(I18nMixin):
             en="Prompt/context passed to Qwen3-ASR-GGUF",
             zh="传给 Qwen3-ASR-GGUF 的提示词/上下文",
         ),
-        "use_dml": Description(en="Enable DirectML acceleration", zh="启用 DirectML 加速"),
-        "use_vulkan": Description(en="Enable Vulkan acceleration", zh="启用 Vulkan 加速"),
-        "timestamp": Description(en="Generate timestamp alignment", zh="生成时间戳对齐"),
-        "asr_encoder_frontend": Description(en="ASR encoder frontend filename", zh="ASR 编码器前段文件名"),
-        "asr_encoder_backend": Description(en="ASR encoder backend filename", zh="ASR 编码器后段文件名"),
-        "asr_llm": Description(en="ASR decoder GGUF filename", zh="ASR 解码器 GGUF 文件名"),
-        "aligner_encoder_frontend": Description(en="Aligner encoder frontend filename", zh="Aligner 编码器前段文件名"),
-        "aligner_encoder_backend": Description(en="Aligner encoder backend filename", zh="Aligner 编码器后段文件名"),
-        "aligner_llm": Description(en="Aligner decoder GGUF filename", zh="Aligner 解码器 GGUF 文件名"),
+        "use_dml": Description(
+            en="Enable DirectML acceleration", zh="启用 DirectML 加速"
+        ),
+        "use_vulkan": Description(
+            en="Enable Vulkan acceleration", zh="启用 Vulkan 加速"
+        ),
+        "timestamp": Description(
+            en="Generate timestamp alignment", zh="生成时间戳对齐"
+        ),
+        "asr_encoder_frontend": Description(
+            en="ASR encoder frontend filename", zh="ASR 编码器前段文件名"
+        ),
+        "asr_encoder_backend": Description(
+            en="ASR encoder backend filename", zh="ASR 编码器后段文件名"
+        ),
+        "asr_llm": Description(
+            en="ASR decoder GGUF filename", zh="ASR 解码器 GGUF 文件名"
+        ),
+        "aligner_encoder_frontend": Description(
+            en="Aligner encoder frontend filename", zh="Aligner 编码器前段文件名"
+        ),
+        "aligner_encoder_backend": Description(
+            en="Aligner encoder backend filename", zh="Aligner 编码器后段文件名"
+        ),
+        "aligner_llm": Description(
+            en="Aligner decoder GGUF filename", zh="Aligner 解码器 GGUF 文件名"
+        ),
         "n_ctx": Description(en="LLM context size", zh="LLM 上下文窗口大小"),
         "chunk_size": Description(en="Chunk size in seconds", zh="分段识别时长（秒）"),
         "memory_num": Description(en="Number of history chunks", zh="保留历史片段数量"),
         "temperature": Description(en="Decode temperature", zh="解码温度"),
+    }
+
+
+class FunASRGGUFConfig(I18nMixin):
+    """Configuration for HaujetZhao/Fun-ASR-GGUF Python runtime."""
+
+    working_dir: str = Field("Fun-ASR-GGUF", alias="working_dir")
+    runtime_dir: str = Field("Fun-ASR-GGUF/model", alias="runtime_dir")
+    model_dir: str = Field("Fun-ASR-GGUF/model/model", alias="model_dir")
+    encoder_onnx: str = Field(
+        "Fun-ASR-Nano-Encoder-Adaptor.fp32.onnx", alias="encoder_onnx"
+    )
+    ctc_onnx: str = Field("Fun-ASR-Nano-CTC.int8.onnx", alias="ctc_onnx")
+    decoder_gguf: str = Field("Fun-ASR-Nano-Decoder.q8_0.gguf", alias="decoder_gguf")
+    tokens: str = Field("tokens.txt", alias="tokens")
+    hotwords_path: Optional[str] = Field("Fun-ASR-GGUF/hot.txt", alias="hotwords_path")
+    language: Optional[str] = Field("中文", alias="language")
+    context: Optional[str] = Field(
+        "请严格逐字转写音频中的原话，不要润色、不要改写、不要补全、不要总结。"
+        "像“喂喂喂”“嗯”“啊”“能听见吗”这类口语和重复词也必须按听到的内容保留。",
+        alias="context",
+    )
+    enable_ctc: bool = Field(True, alias="enable_ctc")
+    onnx_provider: str = Field("DML", alias="onnx_provider")
+    llm_use_gpu: bool = Field(True, alias="llm_use_gpu")
+    vulkan_force_fp32: bool = Field(False, alias="vulkan_force_fp32")
+    n_predict: int = Field(512, alias="n_predict")
+    n_threads: Optional[int] = Field(None, alias="n_threads")
+    n_threads_batch: Optional[int] = Field(None, alias="n_threads_batch")
+    n_ubatch: int = Field(512, alias="n_ubatch")
+    similar_threshold: float = Field(0.6, alias="similar_threshold")
+    max_hotwords: int = Field(10, alias="max_hotwords")
+    ctc_topk: int = Field(20, alias="ctc_topk")
+    dml_pad_to: int = Field(30, alias="dml_pad_to")
+    temperature: float = Field(0.4, alias="temperature")
+    top_p: float = Field(1.0, alias="top_p")
+    top_k: int = Field(50, alias="top_k")
+    streaming_enabled: bool = Field(True, alias="streaming_enabled")
+    streaming_partial_mode: Literal["ctc", "full", "none"] = Field(
+        "ctc", alias="streaming_partial_mode"
+    )
+    streaming_min_audio_ms: int = Field(800, alias="streaming_min_audio_ms")
+    streaming_update_ms: int = Field(600, alias="streaming_update_ms")
+    verbose: bool = Field(False, alias="verbose")
+
+    DESCRIPTIONS: ClassVar[Dict[str, Description]] = {
+        "working_dir": Description(
+            en="Fun-ASR-GGUF submodule directory",
+            zh="Fun-ASR-GGUF 子仓库目录",
+        ),
+        "model_dir": Description(
+            en="Directory containing Fun-ASR-GGUF ONNX/GGUF files",
+            zh="Fun-ASR-GGUF ONNX/GGUF 模型目录",
+        ),
+        "runtime_dir": Description(
+            en="Directory containing the runtime code matching the downloaded model",
+            zh="与下载模型匹配的 Fun-ASR-GGUF 运行时代码目录",
+        ),
+        "encoder_onnx": Description(
+            en="Encoder ONNX filename", zh="Encoder ONNX 文件名"
+        ),
+        "ctc_onnx": Description(en="CTC ONNX filename", zh="CTC ONNX 文件名"),
+        "decoder_gguf": Description(
+            en="Decoder GGUF filename", zh="Decoder GGUF 文件名"
+        ),
+        "tokens": Description(en="tokens.txt filename", zh="tokens.txt 文件名"),
+        "hotwords_path": Description(en="Optional hotwords file", zh="可选热词文件"),
+        "language": Description(
+            en="Language hint, e.g. Chinese", zh="语言提示，例如中文"
+        ),
+        "context": Description(
+            en="Prompt/context for decoding", zh="解码提示词/上下文"
+        ),
+        "enable_ctc": Description(
+            en="Enable CTC helper decoder", zh="启用 CTC 辅助解码"
+        ),
+        "onnx_provider": Description(
+            en="ONNX provider: CPU/CUDA/DML/TensorRT",
+            zh="ONNX 推理后端：CPU/CUDA/DML/TensorRT",
+        ),
+        "llm_use_gpu": Description(
+            en="Enable llama.cpp GPU backend", zh="启用 llama.cpp GPU 后端"
+        ),
+        "vulkan_force_fp32": Description(
+            en="Disable Vulkan FP16", zh="禁用 Vulkan FP16"
+        ),
+        "streaming_enabled": Description(
+            en="Enable realtime partial text display", zh="启用实时增量识别显示"
+        ),
+        "streaming_partial_mode": Description(
+            en="Partial mode: ctc, full, or none",
+            zh="增量模式：ctc、full 或 none",
+        ),
+        "streaming_min_audio_ms": Description(
+            en="Minimum audio before first partial", zh="首次增量识别最短音频毫秒"
+        ),
+        "streaming_update_ms": Description(
+            en="Minimum audio delta between partials",
+            zh="两次增量识别之间的最短音频毫秒",
+        ),
     }
 
 
@@ -485,7 +603,13 @@ class SherpaOnnxASRConfig(I18nMixin):
                     "sense_voice and tokens must be provided for sense_voice model type"
                 )
         elif model_type == "fire_red_asr":
-            if not all([values.fire_red_asr_encoder, values.fire_red_asr_decoder, values.tokens]):
+            if not all(
+                [
+                    values.fire_red_asr_encoder,
+                    values.fire_red_asr_decoder,
+                    values.tokens,
+                ]
+            ):
                 raise ValueError(
                     "fire_red_asr_encoder, fire_red_asr_decoder, and tokens must be provided for fire_red_asr model type"
                 )
@@ -506,6 +630,7 @@ class ASRConfig(I18nMixin):
         "sherpa_onnx_asr",
         "qwen3_asr",
         "qwen3_asr_gguf",
+        "fun_asr_gguf",
     ] = Field(..., alias="asr_model")
     hotwords: list[str] = Field(default_factory=list, alias="hotwords")
     azure_asr: Optional[AzureASRConfig] = Field(None, alias="azure_asr")
@@ -520,9 +645,8 @@ class ASRConfig(I18nMixin):
         None, alias="sherpa_onnx_asr"
     )
     qwen3_asr: Optional[Qwen3ASRConfig] = Field(None, alias="qwen3_asr")
-    qwen3_asr_gguf: Optional[Qwen3ASRGGUFConfig] = Field(
-        None, alias="qwen3_asr_gguf"
-    )
+    qwen3_asr_gguf: Optional[Qwen3ASRGGUFConfig] = Field(None, alias="qwen3_asr_gguf")
+    fun_asr_gguf: Optional[FunASRGGUFConfig] = Field(None, alias="fun_asr_gguf")
 
     DESCRIPTIONS: ClassVar[Dict[str, Description]] = {
         "asr_model": Description(
@@ -552,6 +676,10 @@ class ASRConfig(I18nMixin):
             en="Configuration for Qwen3-ASR-GGUF",
             zh="Qwen3-ASR-GGUF 配置",
         ),
+        "fun_asr_gguf": Description(
+            en="Configuration for HaujetZhao/Fun-ASR-GGUF",
+            zh="HaujetZhao/Fun-ASR-GGUF 配置",
+        ),
     }
 
     @model_validator(mode="after")
@@ -577,5 +705,7 @@ class ASRConfig(I18nMixin):
             values.qwen3_asr.model_validate(values.qwen3_asr.model_dump())
         elif asr_model == "qwen3_asr_gguf" and values.qwen3_asr_gguf is not None:
             values.qwen3_asr_gguf.model_validate(values.qwen3_asr_gguf.model_dump())
+        elif asr_model == "fun_asr_gguf" and values.fun_asr_gguf is not None:
+            values.fun_asr_gguf.model_validate(values.fun_asr_gguf.model_dump())
 
         return values
