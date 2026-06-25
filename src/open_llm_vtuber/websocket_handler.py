@@ -97,6 +97,7 @@ class WebSocketHandler:
             "fetch-history-list": self._handle_history_list_request,
             "fetch-and-set-history": self._handle_fetch_history,
             "create-new-history": self._handle_create_history,
+            "clear-conversation": self._handle_clear_conversation,
             "delete-history": self._handle_delete_history,
             "interrupt-signal": self._handle_interrupt,
             "mic-audio-data": self._handle_audio_data,
@@ -747,6 +748,41 @@ class WebSocketHandler:
                     }
                 )
             )
+
+    async def _handle_clear_conversation(
+        self, websocket: WebSocket, client_uid: str, data: WSMessage
+    ) -> None:
+        """Clear active conversation task and reset backend chat memory."""
+        task = self.current_conversation_tasks.get(client_uid)
+        if task and not task.done():
+            task.cancel()
+        self.current_conversation_tasks[client_uid] = None
+        self.received_data_buffers[client_uid] = np.array([])
+        self._cancel_kws_timeout_task(client_uid)
+
+        audio_session = self.audio_sessions.get(client_uid)
+        if audio_session:
+            audio_session.mark_idle()
+
+        context = self.client_contexts[client_uid]
+        history_uid = create_new_history(context.character_config.conf_uid)
+        success = bool(history_uid)
+        if success:
+            context.history_uid = history_uid
+            context.agent_engine.set_memory_from_history(
+                conf_uid=context.character_config.conf_uid,
+                history_uid=history_uid,
+            )
+
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "conversation-cleared",
+                    "success": success,
+                    "history_uid": history_uid,
+                }
+            )
+        )
 
     async def _handle_delete_history(
         self, websocket: WebSocket, client_uid: str, data: dict
