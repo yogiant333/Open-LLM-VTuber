@@ -233,6 +233,7 @@ export function App() {
   const micCaptureRef = useRef<MicCapture | null>(null);
   const volumeBarRef = useRef<HTMLElement | null>(null);
   const answerListRef = useRef<HTMLDivElement | null>(null);
+  const userTranscriptRef = useRef<HTMLDivElement | null>(null);
   const volumeLevelRef = useRef(0);
   const activeAnswerIdRef = useRef("");
   const playbackQueueRef = useRef<PlaybackTask[]>([]);
@@ -805,6 +806,20 @@ export function App() {
   }, [answerEntries]);
 
   useEffect(() => {
+    const transcriptPanel = userTranscriptRef.current;
+    if (!transcriptPanel) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      transcriptPanel.scrollTo({
+        top: transcriptPanel.scrollHeight,
+        behavior: "smooth",
+      });
+    }, 80);
+  }, [userTranscript]);
+
+  useEffect(() => {
     if (!isStatsOpen) {
       return;
     }
@@ -961,7 +976,10 @@ export function App() {
         )}
 
         {userTranscript && (
-          <div className={`user-transcript ${isUserTranscriptFinal ? "is-final" : ""}`}>
+          <div
+            className={`user-transcript ${isUserTranscriptFinal ? "is-final" : ""}`}
+            ref={userTranscriptRef}
+          >
             <span>{isUserTranscriptFinal ? "已识别" : "正在识别"}</span>
             <p>{userTranscript}</p>
           </div>
