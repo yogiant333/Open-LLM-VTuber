@@ -39,6 +39,7 @@ from .conversations.conversation_handler import (
     handle_group_interrupt,
     handle_individual_interrupt,
 )
+from .conversations.conversation_utils import is_non_speech_asr_transcript
 
 PCM_FLOAT_FLOOR = 1e-7
 WAKEUP_ACK_TEXT = "我在，请说。"
@@ -1387,6 +1388,13 @@ class WebSocketHandler:
         for result in results:
             text = result.text.strip()
             if not text:
+                continue
+            if is_non_speech_asr_transcript(text):
+                logger.info(
+                    "Dropped non-speech streaming ASR transcript: client_uid={} text={}",
+                    client_uid,
+                    text,
+                )
                 continue
             await websocket.send_text(
                 json.dumps(

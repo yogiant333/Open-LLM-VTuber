@@ -19,6 +19,7 @@ export interface BackendMessage {
   server_perf?: {
     turn_id?: string;
     elapsed_ms?: number;
+    source?: string;
   };
   text?: string;
   message?: string;

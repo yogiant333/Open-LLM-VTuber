@@ -53,6 +53,34 @@ def is_single_hanzi_transcript(text: str) -> bool:
     return "\u4e00" <= char <= "\u9fff"
 
 
+ASR_NON_SPEECH_TOKENS = {
+    "/sil",
+    "<sil>",
+    "[sil]",
+    "(sil)",
+    "<|sil|>",
+    "<blank>",
+    "/blank",
+    "<unk>",
+    "/noise",
+    "<noise>",
+}
+
+
+def is_non_speech_asr_transcript(text: str) -> bool:
+    """Return true when ASR emitted only a model control/silence token."""
+    normalized = re.sub(r"\s+", "", (text or "").strip().lower())
+    if not normalized:
+        return False
+
+    normalized = normalized.strip("，。,.!！?？;；:")
+    if normalized in ASR_NON_SPEECH_TOKENS:
+        return True
+
+    token_pattern = "|".join(re.escape(token) for token in ASR_NON_SPEECH_TOKENS)
+    return bool(re.fullmatch(rf"(?:{token_pattern})+", normalized))
+
+
 # Convert class methods to standalone functions
 def create_batch_input(
     input_text: Union[str, List[str]],
@@ -263,6 +291,23 @@ async def process_user_input(
             sample_rate=asr_engine.SAMPLE_RATE,
             metadata=capture_metadata,
         )
+        if is_non_speech_asr_transcript(input_text):
+            logger.info(
+                "Rejected non-speech ASR transcript: client_uid={} text={}",
+                username,
+                input_text,
+            )
+            await websocket_send(
+                json.dumps(
+                    {
+                        "type": "user-input-transcription",
+                        "text": input_text,
+                        "rejected": True,
+                        "reason": "non_speech_token",
+                    }
+                )
+            )
+            return ""
         if is_single_hanzi_transcript(input_text):
             logger.info(
                 "Rejected single-Hanzi ASR transcript: client_uid={} text={}",

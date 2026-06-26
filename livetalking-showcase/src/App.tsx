@@ -561,6 +561,9 @@ export function App() {
               client_since_received_ms: Math.round(waitedAtMs - task.receivedAtMs),
             }),
           );
+          if (task.serverPerf?.source === "wakeup_ack_cache") {
+            websocketRef.current?.send(JSON.stringify({ type: "frontend-playback-complete" }));
+          }
           if (playbackGenerationRef.current !== playbackGeneration) {
             break;
           }
