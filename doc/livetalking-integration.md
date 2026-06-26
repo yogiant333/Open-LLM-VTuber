@@ -143,6 +143,24 @@ POST http://localhost:8010/humanaudio
 
 这和 Open-LLM-VTuber 的现有协议最匹配，因为 Open-LLM-VTuber 的 `audio` WebSocket 消息里已经包含 base64 WAV。
 
+### WebSocket 音频驱动说话
+
+低延迟集成优先使用持久 WebSocket 通道：
+
+```text
+GET ws://localhost:8010/audio_ws?sessionid=<offer 返回的 sessionid>
+```
+
+连接建立后，前端把 Open-LLM-VTuber 下发的 base64 WAV 转成二进制消息发送给 LiveTalking。LiveTalking 收到后按 `sessionid` 找到当前 `avatar_session`，直接调用 `put_audio_file()` 进入音频驱动队列。
+
+每段音频会收到一条 ack：
+
+```json
+{ "code": 0, "msg": "ok", "sequence": 1 }
+```
+
+如果 WebSocket 不可用，前端会自动回退到 `POST /humanaudio`。
+
 ### 打断说话
 
 接口：
@@ -213,9 +231,10 @@ AI 回复后会向前端发送：
 浏览器页面
   ├─ 连接 Open-LLM-VTuber ws://localhost:12393/client-ws
   ├─ 连接 LiveTalking WebRTC http://localhost:8010/offer
+  ├─ 连接 LiveTalking 音频 WebSocket ws://localhost:8010/audio_ws
   ├─ 显示 LiveTalking 返回的视频流
   ├─ 用户输入发送给 Open-LLM-VTuber
-  └─ 收到 Open-LLM-VTuber audio 消息后转发音频到 LiveTalking /humanaudio
+  └─ 收到 Open-LLM-VTuber audio 消息后优先通过 audio_ws 转发，失败时回退 /humanaudio
 ```
 
 流程：

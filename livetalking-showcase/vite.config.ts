@@ -24,6 +24,7 @@ export default defineConfig({
       "/livetalking": {
         target: "http://127.0.0.1:18010",
         changeOrigin: true,
+        ws: true,
         rewrite: (path) => path.replace(/^\/livetalking/, ""),
       },
     },
