@@ -24,6 +24,7 @@ from .conversations.conversation_utils import generate_ui_suggestions
 from .ue_avatar_protocol import send_suggestions
 from .asr.benchmark import ASRBenchmarkManager, decode_wav_bytes
 from .asr.capture import save_asr_capture
+from .utils.sentence_divider import segment_text_by_regex
 
 
 CONFIG_PATH = Path("conf.yaml")
@@ -710,13 +711,15 @@ def init_webtool_routes(default_context_cache: ServiceContext) -> APIRouter:
 
                 logger.info(f"Received text for TTS: {text}")
 
-                # Split text into sentences
-                sentences = [s.strip() for s in text.split(".") if s.strip()]
+                # Split text into sentences while preserving decimal numbers such as 1.2.
+                complete_sentences, remaining_text = segment_text_by_regex(text)
+                sentences = complete_sentences
+                if remaining_text.strip():
+                    sentences.append(remaining_text.strip())
 
                 try:
                     # Generate and send audio for each sentence
                     for sentence in sentences:
-                        sentence = sentence + "."  # Add back the period
                         file_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid4())[:8]}"
                         audio_path = (
                             await default_context_cache.tts_engine.async_generate_audio(

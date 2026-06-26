@@ -121,6 +121,31 @@ AI 回复经过 TTS 后，后端发送 `audio` 消息：
 - `src/open_llm_vtuber/utils/stream_audio.py`
 - `src/open_llm_vtuber/conversations/tts_manager.py`
 - `src/open_llm_vtuber/conversations/conversation_utils.py`
+- `src/open_llm_vtuber/utils/sentence_divider.py`
+
+## TTS 分句规则
+
+LLM 流式输出进入 TTS 前会经过 `SentenceDivider` 分句。分句器需要兼顾低延迟和口播完整性：
+
+- `pysbd` 和 regex 两种分句路径都需要保护数字小数点。
+- `1.2万亿元`、`3.5%` 这类数字不能因为中间的 `.` 被拆成两段 TTS。
+- 流式输出中如果当前缓冲只收到 `1.`，分句器会先保留这段文本，等待后续 token；只有确认不是小数后，才会按句号分段。
+- 独立 `/tts-ws` 路由也复用同一套 regex 分句逻辑，避免直接 `text.split(".")` 破坏小数。
+
+示例：
+
+```text
+今年投资达到1.2万亿元。同比增长明显。
+```
+
+会拆成：
+
+```text
+今年投资达到1.2万亿元。
+同比增长明显。
+```
+
+不会拆成 `今年投资达到1.` 和 `2万亿元。`。
 
 ## 前端 Live2D Adapter 能力
 

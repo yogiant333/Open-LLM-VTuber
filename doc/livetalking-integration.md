@@ -221,7 +221,18 @@ AI 回复后会向前端发送：
 }
 ```
 
-其中 `audio` 可以转成 WAV 文件/Blob，提交到 LiveTalking 的 `/humanaudio`。
+其中 `audio` 可以转成 WAV 二进制，优先通过 LiveTalking 的 `/audio_ws` 发送；如果 WebSocket 不可用，前端会回退到 `/humanaudio`。
+
+## 大屏展示页运行时参数
+
+`livetalking-showcase` 会在浏览器本地保存音频识别阈值：
+
+- `showcase-rms-threshold-dbfs`
+- `showcase-peak-threshold-dbfs`
+
+页面打开并连接 Open-LLM-VTuber 后，会立即把本地保存的 RMS/Peak 阈值通过 `utterance-filter-config-update` 推给后端。只要本地存在保存值，前端就把本地阈值视为权威值，不再用后端返回的旧 `utterance-filter-config-state` 覆盖 UI 和 `localStorage`。
+
+这个设计用于大屏现场调参：不同麦克风、不同设备的输入音量差异较大，调好的阈值应在刷新页面后直接生效，不需要每次手动拖动滑块。
 
 ## 推荐接入方案
 
@@ -246,8 +257,8 @@ AI 回复后会向前端发送：
 5. 页面连接 Open-LLM-VTuber `/client-ws`。
 6. 用户文本/语音进入 Open-LLM-VTuber。
 7. Open-LLM-VTuber 返回 `audio` 消息。
-8. 前端把 `audio` base64 转成 WAV Blob。
-9. 前端用 multipart/form-data 调 LiveTalking `/humanaudio`。
+8. 前端把 `audio` base64 转成 WAV 二进制。
+9. 前端优先通过 LiveTalking `/audio_ws` 发送音频，失败时回退到 multipart/form-data `/humanaudio`。
 10. LiveTalking 生成口型视频，通过 WebRTC 流显示数字人。
 
 ## 为什么推荐前端双连接

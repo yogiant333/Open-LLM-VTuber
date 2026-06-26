@@ -21,6 +21,8 @@ const WAKE_TEXT = "请说 小孟小孟 唤醒";
 const INITIAL_ANSWER_TEXT = "我是小梦数字人，可以通过实时语音和视频为你讲解内容。";
 const DEFAULT_RMS_THRESHOLD_DBFS = -48;
 const DEFAULT_PEAK_THRESHOLD_DBFS = -36;
+const RMS_THRESHOLD_STORAGE_KEY = "showcase-rms-threshold-dbfs";
+const PEAK_THRESHOLD_STORAGE_KEY = "showcase-peak-threshold-dbfs";
 const AUDIO_HISTORY_LIMIT = 160;
 
 function nowTime() {
@@ -276,6 +278,15 @@ function formatVolumeDbfs(dbfs: number) {
   return `${Math.round(dbfs)} dB`;
 }
 
+function readStoredThreshold(key: string) {
+  const stored = localStorage.getItem(key);
+  if (stored === null) {
+    return null;
+  }
+  const value = Number(stored);
+  return Number.isFinite(value) ? value : null;
+}
+
 interface AudioHistoryPoint {
   rmsDbfs: number;
   peakDbfs: number;
@@ -317,6 +328,10 @@ export function App() {
   const audioHistoryLastUpdateRef = useRef(0);
   const rmsThresholdRef = useRef(DEFAULT_RMS_THRESHOLD_DBFS);
   const peakThresholdRef = useRef(DEFAULT_PEAK_THRESHOLD_DBFS);
+  const localThresholdsAreAuthoritativeRef = useRef(
+    readStoredThreshold(RMS_THRESHOLD_STORAGE_KEY) !== null ||
+      readStoredThreshold(PEAK_THRESHOLD_STORAGE_KEY) !== null,
+  );
   const activeAnswerIdRef = useRef("");
   const playbackQueueRef = useRef<PlaybackTask[]>([]);
   const isPlaybackQueueRunningRef = useRef(false);
@@ -343,12 +358,10 @@ export function App() {
   const [peakDbfs, setPeakDbfs] = useState(-100);
   const [audioHistory, setAudioHistory] = useState<AudioHistoryPoint[]>([]);
   const [rmsThresholdDbfs, setRmsThresholdDbfs] = useState(() => {
-    const saved = Number(localStorage.getItem("showcase-rms-threshold-dbfs"));
-    return Number.isFinite(saved) ? saved : DEFAULT_RMS_THRESHOLD_DBFS;
+    return readStoredThreshold(RMS_THRESHOLD_STORAGE_KEY) ?? DEFAULT_RMS_THRESHOLD_DBFS;
   });
   const [peakThresholdDbfs, setPeakThresholdDbfs] = useState(() => {
-    const saved = Number(localStorage.getItem("showcase-peak-threshold-dbfs"));
-    return Number.isFinite(saved) ? saved : DEFAULT_PEAK_THRESHOLD_DBFS;
+    return readStoredThreshold(PEAK_THRESHOLD_STORAGE_KEY) ?? DEFAULT_PEAK_THRESHOLD_DBFS;
   });
   const [question, setQuestion] = useState("");
   const [isInputOpen, setIsInputOpen] = useState(false);
@@ -846,7 +859,6 @@ export function App() {
       setBackendState("ready");
       appendLine("system", "Open-LLM-VTuber 后端已连接。");
       websocket.send(JSON.stringify({ type: "fetch-configs" }));
-      websocket.send(JSON.stringify({ type: "utterance-filter-config-request" }));
       websocket.send(
         JSON.stringify({
           type: "utterance-filter-config-update",
@@ -854,6 +866,9 @@ export function App() {
           min_peak_dbfs: peakThresholdRef.current,
         }),
       );
+      if (!localThresholdsAreAuthoritativeRef.current) {
+        websocket.send(JSON.stringify({ type: "utterance-filter-config-request" }));
+      }
       websocket.send(JSON.stringify({ type: "create-new-history" }));
       window.setTimeout(() => {
         startMicrophone().catch(() => undefined);
@@ -925,6 +940,9 @@ export function App() {
       }
 
       if (message.type === "utterance-filter-config-state" && message.utterance_filter) {
+        if (localThresholdsAreAuthoritativeRef.current) {
+          return;
+        }
         const nextRms = Number(message.utterance_filter.min_rms_dbfs);
         const nextPeak = Number(message.utterance_filter.min_peak_dbfs);
         if (Number.isFinite(nextRms)) {
@@ -983,8 +1001,9 @@ export function App() {
   useEffect(() => {
     rmsThresholdRef.current = rmsThresholdDbfs;
     peakThresholdRef.current = peakThresholdDbfs;
-    localStorage.setItem("showcase-rms-threshold-dbfs", String(rmsThresholdDbfs));
-    localStorage.setItem("showcase-peak-threshold-dbfs", String(peakThresholdDbfs));
+    localThresholdsAreAuthoritativeRef.current = true;
+    localStorage.setItem(RMS_THRESHOLD_STORAGE_KEY, String(rmsThresholdDbfs));
+    localStorage.setItem(PEAK_THRESHOLD_STORAGE_KEY, String(peakThresholdDbfs));
     const timeoutId = window.setTimeout(() => {
       sendUtteranceFilterConfig(rmsThresholdDbfs, peakThresholdDbfs);
     }, 180);

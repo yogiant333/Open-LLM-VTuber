@@ -28,6 +28,7 @@ COMMAS = [
 ]
 
 END_PUNCTUATIONS = [".", "!", "?", "。", "！", "？", "...", "。。。"]
+DECIMAL_POINT_PLACEHOLDER = "\uE000"
 ABBREVIATIONS = [
     "Mr.",
     "Mrs.",
@@ -103,7 +104,20 @@ def is_complete_sentence(text: str) -> bool:
     if any(text.endswith(abbrev) for abbrev in ABBREVIATIONS):
         return False
 
+    if re.search(r"\d\.$", text):
+        return False
+
     return any(text.endswith(punct) for punct in END_PUNCTUATIONS)
+
+
+def protect_decimal_points(text: str) -> str:
+    """Protect decimal points from sentence splitting, including streaming prefixes."""
+    text = re.sub(r"(?<=\d)\.(?=\d)", DECIMAL_POINT_PLACEHOLDER, text)
+    return re.sub(r"(?<=\d)\.$", DECIMAL_POINT_PLACEHOLDER, text)
+
+
+def restore_decimal_points(text: str) -> str:
+    return text.replace(DECIMAL_POINT_PLACEHOLDER, ".")
 
 
 def contains_comma(text: str) -> bool:
@@ -185,7 +199,7 @@ def segment_text_by_regex(text: str) -> Tuple[List[str], str]:
         return [], ""
 
     complete_sentences = []
-    remaining_text = text.strip()
+    remaining_text = protect_decimal_points(text.strip())
 
     # Create pattern for matching sentences ending with any end punctuation
     escaped_punctuations = [re.escape(p) for p in END_PUNCTUATIONS]
@@ -204,10 +218,10 @@ def segment_text_by_regex(text: str) -> Tuple[List[str], str]:
             remaining_text = remaining_text[end_pos:].lstrip()
             continue
 
-        complete_sentences.append(potential_sentence)
+        complete_sentences.append(restore_decimal_points(potential_sentence))
         remaining_text = remaining_text[end_pos:].lstrip()
 
-    return complete_sentences, remaining_text
+    return complete_sentences, restore_decimal_points(remaining_text)
 
 
 def segment_text_by_pysbd(text: str) -> Tuple[List[str], str]:
@@ -225,13 +239,15 @@ def segment_text_by_pysbd(text: str) -> Tuple[List[str], str]:
         return [], ""
 
     try:
+        protected_text = protect_decimal_points(text)
+
         # Detect language
-        lang = detect_language(text)
+        lang = detect_language(protected_text)
 
         if lang is not None:
             # Use pysbd for supported languages
             segmenter = pysbd.Segmenter(language=lang, clean=False)
-            sentences = segmenter.segment(text)
+            sentences = segmenter.segment(protected_text)
 
             if not sentences:
                 return [], text
@@ -241,19 +257,19 @@ def segment_text_by_pysbd(text: str) -> Tuple[List[str], str]:
             for sent in sentences[:-1]:
                 sent = sent.strip()
                 if sent:
-                    complete_sentences.append(sent)
+                    complete_sentences.append(restore_decimal_points(sent))
 
             # Handle the last sentence
             last_sent = sentences[-1].strip()
             if is_complete_sentence(last_sent):
-                complete_sentences.append(last_sent)
+                complete_sentences.append(restore_decimal_points(last_sent))
                 remaining = ""
             else:
-                remaining = last_sent
+                remaining = restore_decimal_points(last_sent)
 
         else:
             # Use regex for unsupported languages
-            return segment_text_by_regex(text)
+            return segment_text_by_regex(protected_text)
 
         logger.debug(
             f"Processed sentences: {complete_sentences}, Remaining: {remaining}"
