@@ -1,14 +1,27 @@
-import { BarChart3, Clock3, Keyboard, MessageSquareX, Mic, MicOff, PlugZap, Send } from "lucide-react";
+import {
+  BarChart3,
+  Clock3,
+  Keyboard,
+  MessageSquareX,
+  Mic,
+  MicOff,
+  PlugZap,
+  Send,
+  SlidersHorizontal,
+} from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LiveTalkingClient } from "./livetalking";
 import type { BackendMessage, ChatLine, ConnectionState } from "./types";
 
-const LIVETALKING_URL = "http://127.0.0.1:18010";
+const LIVETALKING_URL = "/livetalking";
 const LIVETALKING_AVATAR_ID = "xiaomeng_wav2lip256";
-const BACKEND_WS_URL = "ws://127.0.0.1:18080/client-ws";
+const BACKEND_WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/client-ws`;
 
 const WAKE_TEXT = "请说 小孟小孟 唤醒";
 const INITIAL_ANSWER_TEXT = "我是小梦数字人，可以通过实时语音和视频为你讲解内容。";
+const DEFAULT_RMS_THRESHOLD_DBFS = -48;
+const DEFAULT_PEAK_THRESHOLD_DBFS = -36;
+const AUDIO_HISTORY_LIMIT = 160;
 
 function nowTime() {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -73,7 +86,9 @@ interface AnswerEntry {
 interface PlaybackTask {
   audio: string;
   displayText?: BackendMessage["display_text"];
+  serverPerf?: BackendMessage["server_perf"];
   text: string;
+  receivedAtMs: number;
 }
 
 interface WebRtcStatsSnapshot {
@@ -111,6 +126,11 @@ function wait(ms: number) {
   return new Promise<void>((resolve) => {
     window.setTimeout(resolve, ms);
   });
+}
+
+function byteLengthFromBase64(base64: string) {
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
 }
 
 function readAscii(bytes: Uint8Array, offset: number, length: number) {
@@ -192,7 +212,8 @@ function resampleFloat32(input: Float32Array, fromRate: number, toRate: number) 
 type VolumeQuality = "silent" | "low" | "good" | "loud";
 
 interface VolumeLevel {
-  dbfs: number;
+  rmsDbfs: number;
+  peakDbfs: number;
   meter: number;
   quality: VolumeQuality;
 }
@@ -200,34 +221,39 @@ interface VolumeLevel {
 function getAudioLevel(samples: Float32Array): VolumeLevel {
   if (samples.length === 0) {
     return {
-      dbfs: -100,
+      rmsDbfs: -100,
+      peakDbfs: -100,
       meter: 0,
       quality: "silent",
     };
   }
 
   let sum = 0;
+  let peak = 0;
   for (let index = 0; index < samples.length; index += 1) {
-    const sample = samples[index];
+    const sample = Math.abs(samples[index]);
     sum += sample * sample;
+    peak = Math.max(peak, sample);
   }
 
   const rms = Math.sqrt(sum / samples.length);
-  const dbfs = 20 * Math.log10(Math.max(rms, 0.00001));
-  const normalized = Math.min(1, Math.max(0, (dbfs + 54) / 38));
+  const rmsDbfs = 20 * Math.log10(Math.max(rms, 0.00001));
+  const peakDbfs = 20 * Math.log10(Math.max(peak, 0.00001));
+  const normalized = Math.min(1, Math.max(0, (rmsDbfs + 54) / 38));
   const meter = normalized * 0.9;
   let quality: VolumeQuality = "silent";
 
-  if (dbfs > -16) {
+  if (rmsDbfs > -16) {
     quality = "loud";
-  } else if (dbfs >= -34) {
+  } else if (rmsDbfs >= -34) {
     quality = "good";
-  } else if (dbfs >= -46) {
+  } else if (rmsDbfs >= -46) {
     quality = "low";
   }
 
   return {
-    dbfs,
+    rmsDbfs,
+    peakDbfs,
     meter,
     quality,
   };
@@ -250,6 +276,32 @@ function formatVolumeDbfs(dbfs: number) {
   return `${Math.round(dbfs)} dB`;
 }
 
+interface AudioHistoryPoint {
+  rmsDbfs: number;
+  peakDbfs: number;
+  time: number;
+}
+
+function dbfsToChartY(dbfs: number) {
+  const clamped = Math.min(-10, Math.max(-80, dbfs));
+  return 92 - ((clamped + 80) / 70) * 84;
+}
+
+function pointsToPath(points: AudioHistoryPoint[], key: "rmsDbfs" | "peakDbfs") {
+  if (points.length === 0) {
+    return "";
+  }
+
+  const lastIndex = Math.max(1, points.length - 1);
+  return points
+    .map((point, index) => {
+      const x = (index / lastIndex) * 100;
+      const y = dbfsToChartY(point[key]);
+      return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(" ");
+}
+
 export function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const websocketRef = useRef<WebSocket | null>(null);
@@ -261,6 +313,10 @@ export function App() {
   const volumeLevelRef = useRef(0);
   const volumeQualityRef = useRef<VolumeQuality>("silent");
   const volumeDbfsRef = useRef(-100);
+  const peakDbfsRef = useRef(-100);
+  const audioHistoryLastUpdateRef = useRef(0);
+  const rmsThresholdRef = useRef(DEFAULT_RMS_THRESHOLD_DBFS);
+  const peakThresholdRef = useRef(DEFAULT_PEAK_THRESHOLD_DBFS);
   const activeAnswerIdRef = useRef("");
   const playbackQueueRef = useRef<PlaybackTask[]>([]);
   const isPlaybackQueueRunningRef = useRef(false);
@@ -280,14 +336,28 @@ export function App() {
   const [answerText, setAnswerText] = useState(INITIAL_ANSWER_TEXT);
   const [answerEntries, setAnswerEntries] = useState<AnswerEntry[]>([]);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const [isAudioDebugOpen, setIsAudioDebugOpen] = useState(false);
   const [webRtcStats, setWebRtcStats] = useState<WebRtcStatsSnapshot>(EMPTY_WEBRTC_STATS);
   const [volumeQuality, setVolumeQuality] = useState<VolumeQuality>("silent");
   const [volumeDbfs, setVolumeDbfs] = useState(-100);
+  const [peakDbfs, setPeakDbfs] = useState(-100);
+  const [audioHistory, setAudioHistory] = useState<AudioHistoryPoint[]>([]);
+  const [rmsThresholdDbfs, setRmsThresholdDbfs] = useState(() => {
+    const saved = Number(localStorage.getItem("showcase-rms-threshold-dbfs"));
+    return Number.isFinite(saved) ? saved : DEFAULT_RMS_THRESHOLD_DBFS;
+  });
+  const [peakThresholdDbfs, setPeakThresholdDbfs] = useState(() => {
+    const saved = Number(localStorage.getItem("showcase-peak-threshold-dbfs"));
+    return Number.isFinite(saved) ? saved : DEFAULT_PEAK_THRESHOLD_DBFS;
+  });
   const [question, setQuestion] = useState("");
   const [isInputOpen, setIsInputOpen] = useState(false);
   const [chatLines, setChatLines] = useState<ChatLine[]>([
     makeLine("system", "展示页已加载，准备连接 LiveTalking 和 Open-LLM-VTuber。"),
   ]);
+
+  rmsThresholdRef.current = rmsThresholdDbfs;
+  peakThresholdRef.current = peakThresholdDbfs;
 
   const liveTalkingConfig = useMemo(
     () => ({
@@ -300,6 +370,20 @@ export function App() {
 
   const appendLine = useCallback((role: ChatLine["role"], text: string) => {
     setChatLines((current) => [makeLine(role, text), ...current].slice(0, 7));
+  }, []);
+
+  const sendUtteranceFilterConfig = useCallback((rmsDbfs: number, peakDbfsValue: number) => {
+    const websocket = websocketRef.current;
+    if (websocket?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    websocket.send(
+      JSON.stringify({
+        type: "utterance-filter-config-update",
+        min_rms_dbfs: rmsDbfs,
+        min_peak_dbfs: peakDbfsValue,
+      }),
+    );
   }, []);
 
   const refreshWebRtcStats = useCallback(async () => {
@@ -439,17 +523,44 @@ export function App() {
         setSubtitle(task.text);
         setState("speaking");
         setStatusMessage("正在将语音转发给 LiveTalking");
+        const audioDurationMs = getWavDurationMs(task.audio);
+        const sendStartedAtMs = performance.now();
         websocketRef.current?.send(
           JSON.stringify({
             type: "audio-play-start",
             display_text: task.displayText,
+            phase: "livetalking_send_start",
+            server_perf: task.serverPerf,
+            audio_duration_ms: Math.round(audioDurationMs),
+            audio_bytes: byteLengthFromBase64(task.audio),
+            client_queue_wait_ms: Math.round(sendStartedAtMs - task.receivedAtMs),
           }),
         );
 
         try {
           await client.sendAudio(task.audio);
-          const durationMs = getWavDurationMs(task.audio);
-          await wait(durationMs + 900);
+          const sentAtMs = performance.now();
+          websocketRef.current?.send(
+            JSON.stringify({
+              type: "audio-play-event",
+              phase: "livetalking_send_done",
+              server_perf: task.serverPerf,
+              audio_duration_ms: Math.round(audioDurationMs),
+              client_send_ms: Math.round(sentAtMs - sendStartedAtMs),
+              client_since_received_ms: Math.round(sentAtMs - task.receivedAtMs),
+            }),
+          );
+          await wait(audioDurationMs + 900);
+          const waitedAtMs = performance.now();
+          websocketRef.current?.send(
+            JSON.stringify({
+              type: "audio-play-event",
+              phase: "segment_wait_done",
+              server_perf: task.serverPerf,
+              audio_duration_ms: Math.round(audioDurationMs),
+              client_since_received_ms: Math.round(waitedAtMs - task.receivedAtMs),
+            }),
+          );
           if (playbackGenerationRef.current !== playbackGeneration) {
             break;
           }
@@ -514,8 +625,12 @@ export function App() {
     volumeLevelRef.current = 0;
     volumeQualityRef.current = "silent";
     volumeDbfsRef.current = -100;
+    peakDbfsRef.current = -100;
+    audioHistoryLastUpdateRef.current = 0;
     setVolumeQuality("silent");
     setVolumeDbfs(-100);
+    setPeakDbfs(-100);
+    setAudioHistory([]);
     if (volumeBarRef.current) {
       volumeBarRef.current.style.transform = "scaleX(0.03)";
       volumeBarRef.current.dataset.quality = "silent";
@@ -589,10 +704,29 @@ export function App() {
           volumeQualityRef.current = audioLevel.quality;
           setVolumeQuality(audioLevel.quality);
         }
-        const roundedDbfs = Math.round(audioLevel.dbfs);
+        const roundedDbfs = Math.round(audioLevel.rmsDbfs);
         if (roundedDbfs !== volumeDbfsRef.current) {
           volumeDbfsRef.current = roundedDbfs;
           setVolumeDbfs(roundedDbfs);
+        }
+        const roundedPeakDbfs = Math.round(audioLevel.peakDbfs);
+        if (roundedPeakDbfs !== peakDbfsRef.current) {
+          peakDbfsRef.current = roundedPeakDbfs;
+          setPeakDbfs(roundedPeakDbfs);
+        }
+        const now = performance.now();
+        if (now - audioHistoryLastUpdateRef.current > 90) {
+          audioHistoryLastUpdateRef.current = now;
+          setAudioHistory((current) =>
+            [
+              ...current,
+              {
+                rmsDbfs: audioLevel.rmsDbfs,
+                peakDbfs: audioLevel.peakDbfs,
+                time: Date.now(),
+              },
+            ].slice(-AUDIO_HISTORY_LIMIT),
+          );
         }
         if (volumeBarRef.current) {
           volumeBarRef.current.style.transform = `scaleX(${Math.max(0.03, nextLevel)})`;
@@ -709,6 +843,14 @@ export function App() {
       setBackendState("ready");
       appendLine("system", "Open-LLM-VTuber 后端已连接。");
       websocket.send(JSON.stringify({ type: "fetch-configs" }));
+      websocket.send(JSON.stringify({ type: "utterance-filter-config-request" }));
+      websocket.send(
+        JSON.stringify({
+          type: "utterance-filter-config-update",
+          min_rms_dbfs: rmsThresholdRef.current,
+          min_peak_dbfs: peakThresholdRef.current,
+        }),
+      );
       websocket.send(JSON.stringify({ type: "create-new-history" }));
       window.setTimeout(() => {
         startMicrophone().catch(() => undefined);
@@ -741,7 +883,9 @@ export function App() {
         playbackQueueRef.current.push({
           audio: message.audio,
           displayText: message.display_text,
+          serverPerf: message.server_perf,
           text: text || WAKE_TEXT,
+          receivedAtMs: performance.now(),
         });
         processPlaybackQueue().catch(() => undefined);
       }
@@ -775,6 +919,17 @@ export function App() {
         const successText = message.success === false ? "后端会话清空失败" : "会话已清空";
         setStatusMessage(successText);
         appendLine("system", successText);
+      }
+
+      if (message.type === "utterance-filter-config-state" && message.utterance_filter) {
+        const nextRms = Number(message.utterance_filter.min_rms_dbfs);
+        const nextPeak = Number(message.utterance_filter.min_peak_dbfs);
+        if (Number.isFinite(nextRms)) {
+          setRmsThresholdDbfs(nextRms);
+        }
+        if (Number.isFinite(nextPeak)) {
+          setPeakThresholdDbfs(nextPeak);
+        }
       }
 
       if (message.type === "control" && message.text) {
@@ -821,6 +976,17 @@ export function App() {
     startMicrophone,
     stopCurrentPlayback,
   ]);
+
+  useEffect(() => {
+    rmsThresholdRef.current = rmsThresholdDbfs;
+    peakThresholdRef.current = peakThresholdDbfs;
+    localStorage.setItem("showcase-rms-threshold-dbfs", String(rmsThresholdDbfs));
+    localStorage.setItem("showcase-peak-threshold-dbfs", String(peakThresholdDbfs));
+    const timeoutId = window.setTimeout(() => {
+      sendUtteranceFilterConfig(rmsThresholdDbfs, peakThresholdDbfs);
+    }, 180);
+    return () => window.clearTimeout(timeoutId);
+  }, [peakThresholdDbfs, rmsThresholdDbfs, sendUtteranceFilterConfig]);
 
   useEffect(() => {
     const tick = window.setInterval(() => setTime(nowTime()), 1000);
@@ -922,6 +1088,13 @@ export function App() {
     setStatusMessage("正在清空会话");
   };
 
+  const rmsPath = useMemo(() => pointsToPath(audioHistory, "rmsDbfs"), [audioHistory]);
+  const peakPath = useMemo(() => pointsToPath(audioHistory, "peakDbfs"), [audioHistory]);
+  const rmsThresholdY = dbfsToChartY(rmsThresholdDbfs);
+  const peakThresholdY = dbfsToChartY(peakThresholdDbfs);
+  const isCurrentVoiceAccepted =
+    volumeDbfs >= rmsThresholdDbfs && peakDbfs >= peakThresholdDbfs;
+
   return (
     <main className="showcase-shell">
       <span className="sr-only">LiveTalking xiaomeng portrait showcase</span>
@@ -937,6 +1110,13 @@ export function App() {
             <strong>{time}</strong>
           </div>
           <div className="webrtc-stats-wrap">
+            <button
+              className={`stats-toggle ${isAudioDebugOpen ? "is-active" : ""}`}
+              title="音频阈值调试"
+              onClick={() => setIsAudioDebugOpen((current) => !current)}
+            >
+              <SlidersHorizontal size={15} />
+            </button>
             <button
               className={`stats-toggle ${isStatsOpen ? "is-active" : ""}`}
               title="WebRTC 实时统计"
@@ -989,6 +1169,60 @@ export function App() {
                     <dd>{webRtcStats.freezeCount}</dd>
                   </div>
                 </dl>
+              </div>
+            )}
+            {isAudioDebugOpen && (
+              <div className="audio-debug-panel">
+                <div className="audio-debug-title">
+                  <strong>音频阈值</strong>
+                  <span className={isCurrentVoiceAccepted ? "is-active" : ""}>
+                    {isCurrentVoiceAccepted ? "可识别" : "未过线"}
+                  </span>
+                </div>
+                <div className="audio-level-grid">
+                  <div>
+                    <span>RMS</span>
+                    <strong>{formatVolumeDbfs(volumeDbfs)}</strong>
+                  </div>
+                  <div>
+                    <span>PEAK</span>
+                    <strong>{formatVolumeDbfs(peakDbfs)}</strong>
+                  </div>
+                </div>
+                <svg className="audio-wave-chart" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <line x1="0" y1={rmsThresholdY} x2="100" y2={rmsThresholdY} className="rms-threshold" />
+                  <line x1="0" y1={peakThresholdY} x2="100" y2={peakThresholdY} className="peak-threshold" />
+                  <path d={peakPath} className="peak-line" />
+                  <path d={rmsPath} className="rms-line" />
+                </svg>
+                <label className="threshold-control">
+                  <span>
+                    RMS 阈值
+                    <em>{formatVolumeDbfs(rmsThresholdDbfs)}</em>
+                  </span>
+                  <input
+                    type="range"
+                    min="-70"
+                    max="-20"
+                    step="1"
+                    value={rmsThresholdDbfs}
+                    onChange={(event) => setRmsThresholdDbfs(Number(event.target.value))}
+                  />
+                </label>
+                <label className="threshold-control">
+                  <span>
+                    Peak 阈值
+                    <em>{formatVolumeDbfs(peakThresholdDbfs)}</em>
+                  </span>
+                  <input
+                    type="range"
+                    min="-60"
+                    max="-10"
+                    step="1"
+                    value={peakThresholdDbfs}
+                    onChange={(event) => setPeakThresholdDbfs(Number(event.target.value))}
+                  />
+                </label>
               </div>
             )}
           </div>

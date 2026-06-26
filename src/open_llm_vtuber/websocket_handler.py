@@ -1,11 +1,14 @@
+from pathlib import Path
 from typing import Dict, List, Optional, Callable, TypedDict
 from fastapi import WebSocket, WebSocketDisconnect
 import asyncio
 import json
 from enum import Enum
 import numpy as np
+from pydub import AudioSegment
 from loguru import logger
 
+from .agent.output_types import DisplayText
 from .service_context import ServiceContext
 from .chat_group import (
     ChatGroupManager,
@@ -16,6 +19,7 @@ from .chat_group import (
 from .message_handler import message_handler
 from .ue_avatar_server import ue_avatar_server
 from .ue_avatar_protocol import (
+    send_audio_payload,
     send_kws_state,
     send_user_speech_state,
     send_wakeup_status,
@@ -37,6 +41,11 @@ from .conversations.conversation_handler import (
 )
 
 PCM_FLOAT_FLOOR = 1e-7
+WAKEUP_ACK_TEXT = "我在，请说。"
+WAKEUP_ACK_CACHE_PATH = Path("cache") / "wakeup_ack_wozai_qingshuo.wav"
+WAKEUP_ACK_MIN_DBFS = -30.0
+WAKEUP_ACK_TARGET_DBFS = -24.0
+WAKEUP_ACK_PEAK_HEADROOM_DBFS = -2.0
 
 
 class MessageType(Enum):
@@ -51,7 +60,7 @@ class MessageType(Enum):
     ]
     CONVERSATION = ["mic-audio-end", "text-input", "ai-speak-signal"]
     CONFIG = ["fetch-configs", "switch-config"]
-    CONTROL = ["interrupt-signal", "audio-play-start"]
+    CONTROL = ["interrupt-signal", "audio-play-start", "audio-play-event"]
     DATA = ["mic-audio-data"]
 
 
@@ -66,6 +75,13 @@ class WSMessage(TypedDict, total=False):
     history_uid: Optional[str]
     file: Optional[str]
     display_text: Optional[dict]
+    server_perf: Optional[dict]
+    phase: Optional[str]
+    audio_duration_ms: Optional[float]
+    audio_bytes: Optional[int]
+    client_queue_wait_ms: Optional[float]
+    client_send_ms: Optional[float]
+    client_since_received_ms: Optional[float]
 
 
 class WebSocketHandler:
@@ -85,6 +101,8 @@ class WebSocketHandler:
         self.audio_sessions: Dict[str, AudioSession] = {}
         self.kws_timeout_tasks: Dict[str, asyncio.Task] = {}
         self.client_played_response_texts: Dict[str, str] = {}
+        self._wakeup_ack_lock = asyncio.Lock()
+        self._wakeup_ack_prewarm_task: Optional[asyncio.Task] = None
         self._event_loop: asyncio.AbstractEventLoop | None = None
         ue_avatar_server.set_status_listener(self._publish_ue_avatar_status)
 
@@ -112,9 +130,12 @@ class WebSocketHandler:
             "switch-config": self._handle_config_switch,
             "fetch-backgrounds": self._handle_fetch_backgrounds,
             "audio-play-start": self._handle_audio_play_start,
+            "audio-play-event": self._handle_audio_play_event,
             "frontend-playback-complete": self._handle_frontend_playback_complete,
             "kws-config-request": self._handle_kws_config_request,
             "kws-config-update": self._handle_kws_config_update,
+            "utterance-filter-config-request": self._handle_utterance_filter_config_request,
+            "utterance-filter-config-update": self._handle_utterance_filter_config_update,
             "request-init-config": self._handle_init_config_request,
             "heartbeat": self._handle_heartbeat,
         }
@@ -218,6 +239,96 @@ class WebSocketHandler:
 
         # Start microphone
         await websocket.send_text(json.dumps({"type": "control", "text": "start-mic"}))
+        self._schedule_wakeup_ack_prewarm(session_service_context)
+
+    def _schedule_wakeup_ack_prewarm(self, context: ServiceContext) -> None:
+        if self._wakeup_ack_prewarm_task and not self._wakeup_ack_prewarm_task.done():
+            return
+        if WAKEUP_ACK_CACHE_PATH.exists():
+            return
+
+        self._wakeup_ack_prewarm_task = asyncio.create_task(
+            self._ensure_wakeup_ack_audio(context)
+        )
+
+    async def _ensure_wakeup_ack_audio(self, context: ServiceContext) -> Optional[Path]:
+        if WAKEUP_ACK_CACHE_PATH.exists():
+            return WAKEUP_ACK_CACHE_PATH
+
+        async with self._wakeup_ack_lock:
+            if WAKEUP_ACK_CACHE_PATH.exists():
+                return WAKEUP_ACK_CACHE_PATH
+
+            try:
+                WAKEUP_ACK_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+                generated_path = await context.tts_engine.async_generate_audio(
+                    WAKEUP_ACK_TEXT,
+                    file_name_no_ext=WAKEUP_ACK_CACHE_PATH.stem,
+                )
+                generated = Path(generated_path)
+                if generated.resolve() != WAKEUP_ACK_CACHE_PATH.resolve():
+                    WAKEUP_ACK_CACHE_PATH.write_bytes(generated.read_bytes())
+                    try:
+                        context.tts_engine.remove_file(str(generated), verbose=False)
+                    except Exception as exc:
+                        logger.debug(
+                            "Failed to remove temporary wakeup ack audio {}: {}",
+                            generated,
+                            exc,
+                        )
+                self._normalize_wakeup_ack_audio(WAKEUP_ACK_CACHE_PATH)
+                logger.info("Wakeup ack audio cached: {}", WAKEUP_ACK_CACHE_PATH)
+                return WAKEUP_ACK_CACHE_PATH
+            except Exception as exc:
+                logger.warning("Failed to cache wakeup ack audio: {}", exc)
+                return None
+
+    @staticmethod
+    def _normalize_wakeup_ack_audio(audio_path: Path) -> None:
+        audio = AudioSegment.from_file(audio_path)
+        if audio.dBFS == float("-inf"):
+            return
+        if audio.dBFS >= WAKEUP_ACK_MIN_DBFS:
+            return
+
+        normalized = audio.apply_gain(WAKEUP_ACK_TARGET_DBFS - audio.dBFS)
+        peak_trim_db = WAKEUP_ACK_PEAK_HEADROOM_DBFS - normalized.max_dBFS
+        if peak_trim_db < 0:
+            normalized = normalized.apply_gain(peak_trim_db)
+        normalized.export(audio_path, format="wav")
+
+    async def _send_wakeup_ack_audio(
+        self, websocket: WebSocket, client_uid: str
+    ) -> None:
+        context = self.client_contexts[client_uid]
+        audio_path = await self._ensure_wakeup_ack_audio(context)
+        if not audio_path:
+            return
+
+        display_text = DisplayText(
+            text=WAKEUP_ACK_TEXT,
+            name=context.character_config.character_name,
+            avatar=context.character_config.avatar,
+        )
+        try:
+            payload = prepare_audio_payload(
+                str(audio_path),
+                display_text=display_text,
+            )
+            payload["server_perf"] = {
+                "turn_id": f"{client_uid}-wakeup-ack",
+                "elapsed_ms": 0,
+                "source": "wakeup_ack_cache",
+            }
+            await send_audio_payload(payload, username=client_uid)
+            await websocket.send_text(json.dumps(payload))
+            logger.info("Wakeup ack audio sent: client_uid={}", client_uid)
+        except Exception as exc:
+            logger.warning(
+                "Failed to send wakeup ack audio: client_uid={} error={}",
+                client_uid,
+                exc,
+            )
 
     def _publish_ue_avatar_status(self, payload: dict) -> None:
         loop = self._event_loop
@@ -583,6 +694,89 @@ class WebSocketHandler:
             new_config.sherpa_onnx_kws.keywords_threshold,
         )
         await self._broadcast_kws_config_state()
+
+    @staticmethod
+    def _public_utterance_filter_config(context: ServiceContext) -> dict:
+        utterance_filter = context.character_config.vad_config.utterance_filter
+        return {
+            "enabled": utterance_filter.enabled,
+            "min_rms_dbfs": utterance_filter.min_rms_dbfs,
+            "min_peak_dbfs": utterance_filter.min_peak_dbfs,
+        }
+
+    async def _handle_utterance_filter_config_request(
+        self, websocket: WebSocket, client_uid: str, data: dict
+    ) -> None:
+        context = self.client_contexts[client_uid]
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "utterance-filter-config-state",
+                    "success": True,
+                    "utterance_filter": self._public_utterance_filter_config(context),
+                }
+            )
+        )
+
+    async def _handle_utterance_filter_config_update(
+        self, websocket: WebSocket, client_uid: str, data: dict
+    ) -> None:
+        context = self.client_contexts[client_uid]
+        utterance_filter = context.character_config.vad_config.utterance_filter
+
+        try:
+            min_rms_dbfs = float(
+                data.get("min_rms_dbfs", utterance_filter.min_rms_dbfs)
+            )
+            min_peak_dbfs = float(
+                data.get("min_peak_dbfs", utterance_filter.min_peak_dbfs)
+            )
+            enabled = bool(data.get("enabled", utterance_filter.enabled))
+
+            if not -90.0 <= min_rms_dbfs <= -5.0:
+                raise ValueError("min_rms_dbfs must be between -90 and -5")
+            if not -90.0 <= min_peak_dbfs <= -1.0:
+                raise ValueError("min_peak_dbfs must be between -90 and -1")
+
+            utterance_filter.enabled = enabled
+            utterance_filter.min_rms_dbfs = min_rms_dbfs
+            utterance_filter.min_peak_dbfs = min_peak_dbfs
+        except Exception as exc:
+            logger.warning(
+                "Utterance filter runtime config update failed: client_uid={} error={}",
+                client_uid,
+                exc,
+            )
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "utterance-filter-config-state",
+                        "success": False,
+                        "message": str(exc),
+                        "utterance_filter": self._public_utterance_filter_config(
+                            context
+                        ),
+                    }
+                )
+            )
+            return
+
+        logger.info(
+            "Utterance filter runtime config updated: client_uid={} enabled={} min_rms_dbfs={:.1f} min_peak_dbfs={:.1f}",
+            client_uid,
+            utterance_filter.enabled,
+            utterance_filter.min_rms_dbfs,
+            utterance_filter.min_peak_dbfs,
+        )
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "utterance-filter-config-state",
+                    "success": True,
+                    "utterance_filter": self._public_utterance_filter_config(context),
+                }
+            )
+        )
 
     async def _handle_group_operation(
         self, websocket: WebSocket, client_uid: str, data: dict
@@ -980,6 +1174,7 @@ class WebSocketHandler:
                     keyword=event.keyword or "",
                     source="client-ws",
                 )
+                await self._send_wakeup_ack_audio(websocket, client_uid)
             elif event.type == "speech-start":
                 self._reset_asr_stream(client_uid)
                 self.asr_stream_active[client_uid] = True
@@ -990,25 +1185,11 @@ class WebSocketHandler:
                     True,
                     "speech-start",
                 )
-                await websocket.send_text(
-                    json.dumps({"type": "control", "text": "interrupt"})
-                )
                 task = self.current_conversation_tasks.get(client_uid)
                 if task and not task.done():
-                    if self._is_client_asr_transcribing(client_uid):
-                        logger.info(
-                            "Ignoring KWS speech-start interrupt while ASR is transcribing: client_uid={}",
-                            client_uid,
-                        )
-                        continue
                     logger.info(
-                        "KWS speech-start interrupts active conversation: client_uid={}",
+                        "KWS speech-start detected during active conversation; waiting for valid utterance before interrupt: client_uid={}",
                         client_uid,
-                    )
-                    await self._handle_interrupt(
-                        websocket,
-                        client_uid,
-                        {"type": "interrupt-signal"},
                     )
             elif event.type == "speech-end":
                 await self._send_user_speech_state(
@@ -1028,6 +1209,26 @@ class WebSocketHandler:
                         "speech-rejected",
                     )
                     continue
+                task = self.current_conversation_tasks.get(client_uid)
+                if task and not task.done():
+                    if self._is_client_asr_transcribing(client_uid):
+                        logger.info(
+                            "Ignoring KWS valid utterance interrupt while ASR is transcribing: client_uid={}",
+                            client_uid,
+                        )
+                        continue
+                    logger.info(
+                        "KWS valid utterance interrupts active conversation: client_uid={}",
+                        client_uid,
+                    )
+                    await websocket.send_text(
+                        json.dumps({"type": "control", "text": "interrupt"})
+                    )
+                    await self._handle_interrupt(
+                        websocket,
+                        client_uid,
+                        {"type": "interrupt-signal"},
+                    )
                 if self.asr_stream_active.get(client_uid):
                     await self._feed_asr_stream(
                         websocket,
@@ -1087,16 +1288,16 @@ class WebSocketHandler:
             rms_dbfs >= utterance_filter.min_rms_dbfs
             and peak_dbfs >= utterance_filter.min_peak_dbfs
         )
-        if not accepted:
-            logger.info(
-                "Rejected low-energy utterance: client_uid={} source={} rms_dbfs={:.1f} peak_dbfs={:.1f} thresholds=({:.1f}, {:.1f})",
-                client_uid,
-                source,
-                rms_dbfs,
-                peak_dbfs,
-                utterance_filter.min_rms_dbfs,
-                utterance_filter.min_peak_dbfs,
-            )
+        logger.info(
+            "Utterance energy check: client_uid={} source={} accepted={} rms_dbfs={:.1f} peak_dbfs={:.1f} thresholds=({:.1f}, {:.1f})",
+            client_uid,
+            source,
+            accepted,
+            rms_dbfs,
+            peak_dbfs,
+            utterance_filter.min_rms_dbfs,
+            utterance_filter.min_peak_dbfs,
+        )
         return accepted
 
     async def _send_user_speech_state(
@@ -1274,6 +1475,8 @@ class WebSocketHandler:
         if audio_session:
             audio_session.mark_speaking()
 
+        self._log_frontend_playback_event(client_uid, data)
+
         display_text = data.get("display_text")
         if display_text:
             played_text = str(display_text.get("text", "")).strip()
@@ -1297,6 +1500,28 @@ class WebSocketHandler:
                 await self.broadcast_to_group(
                     group_members, silent_payload, exclude_uid=client_uid
                 )
+
+    async def _handle_audio_play_event(
+        self, websocket: WebSocket, client_uid: str, data: WSMessage
+    ) -> None:
+        self._log_frontend_playback_event(client_uid, data)
+
+    def _log_frontend_playback_event(self, client_uid: str, data: WSMessage) -> None:
+        server_perf = data.get("server_perf") or {}
+        logger.info(
+            "PERF frontend_playback client_uid={} phase={} server_turn_id={} "
+            "server_elapsed_ms={} audio_duration_ms={} audio_bytes={} "
+            "client_queue_wait_ms={} client_send_ms={} client_since_received_ms={}",
+            client_uid,
+            data.get("phase") or data.get("type"),
+            server_perf.get("turn_id", ""),
+            server_perf.get("elapsed_ms"),
+            data.get("audio_duration_ms"),
+            data.get("audio_bytes"),
+            data.get("client_queue_wait_ms"),
+            data.get("client_send_ms"),
+            data.get("client_since_received_ms"),
+        )
 
     async def _handle_frontend_playback_complete(
         self, websocket: WebSocket, client_uid: str, data: WSMessage

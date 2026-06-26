@@ -16,6 +16,10 @@ export interface BackendMessage {
   type?: string;
   audio?: string;
   display_text?: DisplayText;
+  server_perf?: {
+    turn_id?: string;
+    elapsed_ms?: number;
+  };
   text?: string;
   message?: string;
   success?: boolean;
@@ -23,6 +27,11 @@ export interface BackendMessage {
   rejected?: boolean;
   client_uid?: string;
   history_uid?: string;
+  utterance_filter?: {
+    enabled?: boolean;
+    min_rms_dbfs?: number;
+    min_peak_dbfs?: number;
+  };
 }
 
 export interface ChatLine {

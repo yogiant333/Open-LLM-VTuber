@@ -127,6 +127,7 @@ button {
 .answer-float,
 .keyboard-panel,
 .webrtc-stats-panel,
+.audio-debug-panel,
 .stats-toggle,
 .status-dot,
 .session-watermark {
@@ -165,9 +166,11 @@ button {
 }
 
 .webrtc-stats-wrap {
-  display: grid;
-  justify-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
+  max-width: min(62vw, 300px);
   pointer-events: auto;
 }
 
@@ -187,11 +190,134 @@ button {
 }
 
 .webrtc-stats-panel {
+  flex: 0 0 172px;
   width: 172px;
   padding: 10px;
   color: #f7ffff;
   border-radius: 8px;
   background: rgba(0, 10, 12, 0.34);
+}
+
+.audio-debug-panel {
+  flex: 0 0 min(280px, 62vw);
+  width: min(280px, 62vw);
+  padding: 10px;
+  color: #f7ffff;
+  border-radius: 8px;
+  background: rgba(0, 10, 12, 0.38);
+}
+
+.audio-debug-title,
+.audio-level-grid,
+.threshold-control span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.audio-debug-title strong {
+  color: #20d6c7;
+  font-size: 10px;
+}
+
+.audio-debug-title span {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.audio-debug-title span.is-active {
+  color: #67f48e;
+}
+
+.audio-level-grid {
+  margin-top: 8px;
+}
+
+.audio-level-grid div {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.audio-level-grid span,
+.threshold-control span {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.audio-level-grid strong {
+  display: block;
+  margin-top: 2px;
+  color: #fff;
+  font-size: 12px;
+}
+
+.audio-wave-chart {
+  width: 100%;
+  height: 84px;
+  margin-top: 9px;
+  overflow: visible;
+  border-radius: 6px;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    rgba(0, 0, 0, 0.18);
+  background-size: 100% 25%, 20% 100%, 100% 100%;
+}
+
+.audio-wave-chart path,
+.audio-wave-chart line {
+  vector-effect: non-scaling-stroke;
+}
+
+.audio-wave-chart path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.audio-wave-chart .rms-line {
+  stroke: #20d6c7;
+  stroke-width: 1.8;
+  filter: drop-shadow(0 0 4px rgba(32, 214, 199, 0.55));
+}
+
+.audio-wave-chart .peak-line {
+  stroke: rgba(255, 216, 74, 0.76);
+  stroke-width: 1.2;
+}
+
+.audio-wave-chart .rms-threshold {
+  stroke: rgba(32, 214, 199, 0.52);
+  stroke-dasharray: 3 3;
+  stroke-width: 1;
+}
+
+.audio-wave-chart .peak-threshold {
+  stroke: rgba(255, 216, 74, 0.54);
+  stroke-dasharray: 3 3;
+  stroke-width: 1;
+}
+
+.threshold-control {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.threshold-control em {
+  color: #fff;
+  font-style: normal;
+}
+
+.threshold-control input {
+  width: 100%;
+  accent-color: #20d6c7;
 }
 
 .webrtc-stats-panel strong {

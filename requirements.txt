@@ -321,7 +321,7 @@ numba==0.65.1
     #   librosa
     #   pynndescent
     #   umap-learn
-numpy==1.26.4
+numpy==2.4.2
     # via
     #   accelerate
     #   dynet38

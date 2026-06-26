@@ -19,7 +19,7 @@ dependencies = [
     "langdetect>=1.0.9",
     "loguru>=0.7.2",
     "mcp[cli]>=1.6.0",
-    "numpy>=1.26.4,<3",
+    "numpy==2.4.2",
     "onnxruntime>=1.20.1",
     "onnxruntime-directml>=1.24.4; sys_platform == 'win32'",
     "openai>=1.57.4",

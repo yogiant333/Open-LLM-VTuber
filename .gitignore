@@ -24,6 +24,7 @@ avatars/*
 # Python files
 __pycache__/
 *.pyc
+*.egg-info/
 lab.py
 .idea
 
