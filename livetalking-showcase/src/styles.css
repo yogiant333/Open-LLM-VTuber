@@ -148,9 +148,9 @@ button {
   right: clamp(14px, 3vw, 28px);
   left: clamp(14px, 3vw, 28px);
   z-index: 4;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: flex-start;
-  justify-content: space-between;
   gap: 12px;
   pointer-events: none;
 }
@@ -203,7 +203,8 @@ button {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-  max-width: min(62vw, 300px);
+  min-width: 0;
+  max-width: 100%;
   pointer-events: auto;
 }
 
@@ -225,6 +226,7 @@ button {
 .webrtc-stats-panel {
   flex: 0 0 172px;
   width: 172px;
+  max-width: 100%;
   padding: 10px;
   color: #f7ffff;
   border-radius: 8px;
@@ -232,8 +234,9 @@ button {
 }
 
 .audio-debug-panel {
-  flex: 0 0 min(280px, 62vw);
-  width: min(280px, 62vw);
+  flex: 0 1 min(280px, 100%);
+  width: min(280px, 100%);
+  max-width: 100%;
   padding: 10px;
   color: #f7ffff;
   border-radius: 8px;

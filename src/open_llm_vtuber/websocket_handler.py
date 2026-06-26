@@ -321,15 +321,25 @@ class WebSocketHandler:
                 "elapsed_ms": 0,
                 "source": "wakeup_ack_cache",
             }
-            await send_audio_payload(payload, username=client_uid)
             await websocket.send_text(json.dumps(payload))
             logger.info("Wakeup ack audio sent: client_uid={}", client_uid)
+            task = asyncio.create_task(send_audio_payload(payload, username=client_uid))
+            task.add_done_callback(self._consume_background_task_result)
         except Exception as exc:
             logger.warning(
                 "Failed to send wakeup ack audio: client_uid={} error={}",
                 client_uid,
                 exc,
             )
+
+    @staticmethod
+    def _consume_background_task_result(task: asyncio.Task) -> None:
+        try:
+            task.exception()
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logger.warning("Background task failed: {}", exc)
 
     def _publish_ue_avatar_status(self, payload: dict) -> None:
         loop = self._event_loop
@@ -1163,6 +1173,7 @@ class WebSocketHandler:
                 await websocket.send_text(
                     json.dumps({"type": "control", "text": "wakeup-detected"})
                 )
+                await self._send_wakeup_ack_audio(websocket, client_uid)
                 await send_wakeup_status(
                     event.keyword or "",
                     username=client_uid,
@@ -1175,7 +1186,6 @@ class WebSocketHandler:
                     keyword=event.keyword or "",
                     source="client-ws",
                 )
-                await self._send_wakeup_ack_audio(websocket, client_uid)
             elif event.type == "speech-start":
                 self._reset_asr_stream(client_uid)
                 self.asr_stream_active[client_uid] = True
