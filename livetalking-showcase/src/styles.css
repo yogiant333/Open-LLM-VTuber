@@ -448,15 +448,15 @@ button {
 
 .wake-caption {
   position: absolute;
-  right: clamp(14px, 3vw, 28px);
-  bottom: clamp(30px, 4vh, 48px);
-  left: clamp(14px, 3vw, 28px);
-  z-index: 5;
+  right: clamp(18px, 4vw, 34px);
+  bottom: clamp(118px, 13vh, 172px);
+  left: clamp(18px, 4vw, 34px);
+  z-index: 7;
   max-height: 15vh;
-  padding: 8px 11px;
+  padding: 9px 12px;
   text-align: center;
   border-radius: 8px;
-  background: rgba(0, 10, 12, 0.34);
+  background: rgba(0, 10, 12, 0.48);
 }
 
 .volume-meter {
@@ -556,12 +556,12 @@ button {
 }
 
 .wake-caption p {
-  min-height: 24px;
+  min-height: 28px;
   max-height: calc(15vh - 16px);
   margin: 0;
   overflow-y: auto;
   color: #f7ffff;
-  font-size: clamp(11px, 1.65vh, 17px);
+  font-size: clamp(16px, 1.7vh, 24px);
   font-weight: 800;
   line-height: 1.28;
   letter-spacing: 0;

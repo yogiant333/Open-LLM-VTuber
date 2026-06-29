@@ -393,7 +393,7 @@ character_config:
     edge_tts:
       # 查看文档：https://github.com/rany2/edge-tts
       # 使用 `edge-tts --list-voices` 列出所有可用语音
-      voice: zh-CN-YunxiNeural # 中文男声；可用 `python -m edge_tts --list-voices` 查看更多音色
+      voice: zh-CN-YunjianNeural # 中文男声；可用 `python -m edge_tts --list-voices` 查看更多音色
       proxy: '' # 如直连微软语音超时，可填写 HTTP 代理，例如 'http://127.0.0.1:10809'
 
     # pyttsx3_tts 没有任何配置。
@@ -517,7 +517,7 @@ character_config:
       vits_dict_dir: 'models/vits-zh-hf-fanchen-wnj/dict' # Jieba 字典路径（可选，用于中文）
       tts_rule_fsts: 'models/vits-zh-hf-fanchen-wnj/number.fst' # 规则 FST 文件路径（可选）
       max_num_sentences: 2 # 每批最大句子数（或 -1 表示全部）
-      sid: 0 # 说话人 ID（对于多说话人模型）
+      sid: 0 # 说话人 ID（fanchen-wnj 单男声）
       provider: 'cpu' # 使用 'cpu'、'cuda'（GPU）或 'coreml'（Apple）
       num_threads: 8 # 计算线程数
       speed: 1.0 # 语速（1.0 为正常）
@@ -575,16 +575,16 @@ character_config:
     silero_vad:
       orig_sr: 16000 # 原始音频采样率
       target_sr: 16000 # 目标音频采样率
-      prob_threshold: 0.4 # 语音活动检测的概率阈值
-      db_threshold: 60 # 语音活动检测的分贝阈值
-      required_hits: 3 # 连续命中次数以确认语音
+      prob_threshold: 0.55 # 语音活动检测的概率阈值
+      db_threshold: 65 # 语音活动检测的分贝阈值
+      required_hits: 4 # 连续命中次数以确认语音
       required_misses: 18 # 连续未命中次数以确认静音，18 * 32ms ≈ 0.58s；当前状态机两段判定约 1.15s
       smoothing_window: 5 # 语音活动检测的平滑窗口大小
 
     utterance_filter:
       enabled: true # VAD 后按整段音频能量过滤低音量误触发；只需重启后端生效
-      min_rms_dbfs: -42.0 # 整段 RMS 低于该值则丢弃，数值越高过滤越严格
-      min_peak_dbfs: -28.0 # 峰值低于该值则丢弃，数值越高过滤越严格
+      min_rms_dbfs: -20.0 # 整段 RMS 低于该值则丢弃，数值越高过滤越严格
+      min_peak_dbfs: -12.0 # 峰值低于该值则丢弃，数值越高过滤越严格
 
   # =================== Keyword Spotting ===================
   kws_config:
@@ -598,8 +598,7 @@ character_config:
     frame_ms: 40
     pre_roll_ms: 600
     cooldown_seconds: 2.0
-    listen_timeout_seconds: 10.0
-    active_timeout_seconds: 10.0 # 数字人播放完成后 10 秒内可继续追问，超时后需要重新说唤醒词
+    active_timeout_seconds: 15.0 # 数字人播放完成后 15 秒内可继续追问，超时后需要重新说唤醒词
     sherpa_onnx_kws:
       encoder: ./models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/encoder-epoch-13-avg-2-chunk-16-left-64.int8.onnx
       decoder: ./models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/decoder-epoch-13-avg-2-chunk-16-left-64.onnx

@@ -2,7 +2,8 @@ import os
 import sys
 import threading
 
-import pyttsx3
+import pythoncom
+import win32com.client
 from loguru import logger
 
 from .tts_interface import TTSInterface
@@ -16,11 +17,11 @@ sys.path.append(current_dir)
 
 class TTSEngine(TTSInterface):
     def __init__(self):
-        self.engine = pyttsx3.init()
         self.temp_audio_file = "temp"
-        self.file_extension = "aiff"
+        self.file_extension = "wav"
         self.new_audio_dir = "cache"
         self.lock = threading.Lock()
+        self.voice_match = "Kangkang"
 
         if not os.path.exists(self.new_audio_dir):
             os.makedirs(self.new_audio_dir)
@@ -31,10 +32,37 @@ class TTSEngine(TTSInterface):
         file_name = self.generate_cache_file_name(file_name_no_ext, self.file_extension)
 
         with self.lock:
-            self.engine.save_to_file(text=text, filename=file_name)
-            self.engine.runAndWait()
+            self._speak_to_wav(text, file_name)
         logger.info(f"Finished Generating {file_name}")
         return file_name
+
+    def _speak_to_wav(self, text: str, file_name: str) -> None:
+        pythoncom.CoInitialize()
+        try:
+            voice = win32com.client.Dispatch("SAPI.SpVoice")
+            self._select_voice(voice)
+
+            stream = win32com.client.Dispatch("SAPI.SpFileStream")
+            stream.Open(os.path.abspath(file_name), 3, False)
+            try:
+                voice.AudioOutputStream = stream
+                voice.Speak(text, 0)
+            finally:
+                stream.Close()
+        finally:
+            pythoncom.CoUninitialize()
+
+    def _select_voice(self, voice) -> None:
+        voices = voice.GetVoices()
+        for idx in range(voices.Count):
+            token = voices.Item(idx)
+            description = token.GetDescription()
+            if self.voice_match in description or self.voice_match in token.Id:
+                voice.Voice = token
+                logger.debug(f"pyttsx3_tts selected SAPI voice: {description}")
+                return
+
+        logger.warning("pyttsx3_tts preferred Chinese male voice Kangkang not found")
 
 
 if __name__ == "__main__":

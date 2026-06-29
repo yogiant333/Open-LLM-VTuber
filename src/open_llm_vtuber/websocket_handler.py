@@ -102,6 +102,7 @@ class WebSocketHandler:
         self.audio_sessions: Dict[str, AudioSession] = {}
         self.kws_timeout_tasks: Dict[str, asyncio.Task] = {}
         self.client_played_response_texts: Dict[str, str] = {}
+        self._audio_frame_debug_seen: set[str] = set()
         self._wakeup_ack_lock = asyncio.Lock()
         self._wakeup_ack_prewarm_task: Optional[asyncio.Task] = None
         self._event_loop: asyncio.AbstractEventLoop | None = None
@@ -380,7 +381,6 @@ class WebSocketHandler:
             "frame_ms": kws_config.frame_ms,
             "pre_roll_ms": kws_config.pre_roll_ms,
             "cooldown_seconds": kws_config.cooldown_seconds,
-            "listen_timeout_seconds": kws_config.listen_timeout_seconds,
             "active_timeout_seconds": kws_config.active_timeout_seconds,
             "keywords_score": sherpa_config.keywords_score,
             "keywords_threshold": sherpa_config.keywords_threshold,
@@ -395,7 +395,6 @@ class WebSocketHandler:
             "frame_ms",
             "pre_roll_ms",
             "cooldown_seconds",
-            "listen_timeout_seconds",
             "active_timeout_seconds",
         }
         allowed_sherpa = {"keywords_score", "keywords_threshold"}
@@ -425,8 +424,6 @@ class WebSocketHandler:
             raise ValueError("KWS pre_roll_ms must be between 0 and 3000")
         if new_config.cooldown_seconds < 0 or new_config.cooldown_seconds > 30:
             raise ValueError("KWS cooldown_seconds must be between 0 and 30")
-        if new_config.listen_timeout_seconds <= 0 or new_config.listen_timeout_seconds > 60:
-            raise ValueError("KWS listen_timeout_seconds must be between 0 and 60")
         if new_config.active_timeout_seconds <= 0 or new_config.active_timeout_seconds > 600:
             raise ValueError("KWS active_timeout_seconds must be between 0 and 600")
         if new_config.sherpa_onnx_kws.keywords_score <= 0:
@@ -532,13 +529,7 @@ class WebSocketHandler:
         audio_session: AudioSession,
     ) -> None:
         self._cancel_kws_timeout_task(client_uid)
-        timeout_seconds = float(
-            getattr(
-                audio_session.config,
-                "active_timeout_seconds",
-                audio_session.config.listen_timeout_seconds,
-            )
-        )
+        timeout_seconds = float(audio_session.config.active_timeout_seconds)
 
         async def expire_awake_window() -> None:
             try:
@@ -1089,6 +1080,21 @@ class WebSocketHandler:
         """Handle incoming raw audio data for VAD processing"""
         context = self.client_contexts[client_uid]
         chunk = data.get("audio", [])
+        if chunk and client_uid not in self._audio_frame_debug_seen:
+            self._audio_frame_debug_seen.add(client_uid)
+            samples = np.array(chunk, dtype=np.float32)
+            peak = float(np.max(np.abs(samples))) if samples.size else 0.0
+            rms = float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
+            peak_dbfs = 20.0 * np.log10(max(peak, PCM_FLOAT_FLOOR))
+            rms_dbfs = 20.0 * np.log10(max(rms, PCM_FLOAT_FLOOR))
+            logger.info(
+                "First raw audio frame received: client_uid={} samples={} rms_dbfs={:.1f} peak_dbfs={:.1f} audio_session={}",
+                client_uid,
+                samples.size,
+                rms_dbfs,
+                peak_dbfs,
+                client_uid in self.audio_sessions,
+            )
         audio_session = self.audio_sessions.get(client_uid)
         if chunk and audio_session:
             await self._handle_kws_audio_frame(websocket, client_uid, data, audio_session)

@@ -2,9 +2,11 @@ import {
   BarChart3,
   Clock3,
   Keyboard,
+  Maximize2,
   MessageSquareX,
   Mic,
   MicOff,
+  Minimize2,
   PlugZap,
   Send,
   SlidersHorizontal,
@@ -19,8 +21,8 @@ const BACKEND_WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}:
 
 const WAKE_TEXT = "请说 小孟小孟 唤醒";
 const INITIAL_ANSWER_TEXT = "我是小梦数字人，可以通过实时语音和视频为你讲解内容。";
-const DEFAULT_RMS_THRESHOLD_DBFS = -48;
-const DEFAULT_PEAK_THRESHOLD_DBFS = -36;
+const DEFAULT_RMS_THRESHOLD_DBFS = -20;
+const DEFAULT_PEAK_THRESHOLD_DBFS = -12;
 const RMS_THRESHOLD_STORAGE_KEY = "showcase-rms-threshold-dbfs";
 const PEAK_THRESHOLD_STORAGE_KEY = "showcase-peak-threshold-dbfs";
 const AUDIO_HISTORY_LIMIT = 160;
@@ -213,6 +215,9 @@ function resampleFloat32(input: Float32Array, fromRate: number, toRate: number) 
 
 type VolumeQuality = "silent" | "low" | "good" | "loud";
 
+const MIN_VOLUME_DBFS = -100;
+const MAX_VOLUME_DBFS = 0;
+
 interface VolumeLevel {
   rmsDbfs: number;
   peakDbfs: number;
@@ -223,8 +228,8 @@ interface VolumeLevel {
 function getAudioLevel(samples: Float32Array): VolumeLevel {
   if (samples.length === 0) {
     return {
-      rmsDbfs: -100,
-      peakDbfs: -100,
+      rmsDbfs: MIN_VOLUME_DBFS,
+      peakDbfs: MIN_VOLUME_DBFS,
       meter: 0,
       quality: "silent",
     };
@@ -232,15 +237,30 @@ function getAudioLevel(samples: Float32Array): VolumeLevel {
 
   let sum = 0;
   let peak = 0;
+  let validSampleCount = 0;
   for (let index = 0; index < samples.length; index += 1) {
-    const sample = Math.abs(samples[index]);
+    const rawSample = samples[index];
+    if (!Number.isFinite(rawSample)) {
+      continue;
+    }
+    const sample = Math.min(1, Math.abs(rawSample));
     sum += sample * sample;
     peak = Math.max(peak, sample);
+    validSampleCount += 1;
   }
 
-  const rms = Math.sqrt(sum / samples.length);
-  const rmsDbfs = 20 * Math.log10(Math.max(rms, 0.00001));
-  const peakDbfs = 20 * Math.log10(Math.max(peak, 0.00001));
+  if (validSampleCount === 0) {
+    return {
+      rmsDbfs: MIN_VOLUME_DBFS,
+      peakDbfs: MIN_VOLUME_DBFS,
+      meter: 0,
+      quality: "silent",
+    };
+  }
+
+  const rms = Math.sqrt(sum / validSampleCount);
+  const rmsDbfs = sanitizeDbfs(20 * Math.log10(Math.max(rms, 0.00001)));
+  const peakDbfs = sanitizeDbfs(20 * Math.log10(Math.max(peak, 0.00001)));
   const normalized = Math.min(1, Math.max(0, (rmsDbfs + 54) / 38));
   const meter = normalized * 0.9;
   let quality: VolumeQuality = "silent";
@@ -272,10 +292,15 @@ function getVolumeQualityText(quality: VolumeQuality) {
 }
 
 function formatVolumeDbfs(dbfs: number) {
-  if (dbfs <= -99) {
-    return "-∞ dB";
+  const safeDbfs = sanitizeDbfs(dbfs);
+  return `${Math.round(safeDbfs)} dB`;
+}
+
+function sanitizeDbfs(dbfs: number) {
+  if (!Number.isFinite(dbfs)) {
+    return MIN_VOLUME_DBFS;
   }
-  return `${Math.round(dbfs)} dB`;
+  return Math.min(MAX_VOLUME_DBFS, Math.max(MIN_VOLUME_DBFS, dbfs));
 }
 
 function readStoredThreshold(key: string) {
@@ -294,7 +319,7 @@ interface AudioHistoryPoint {
 }
 
 function dbfsToChartY(dbfs: number) {
-  const clamped = Math.min(-10, Math.max(-80, dbfs));
+  const clamped = Math.min(-10, Math.max(-80, sanitizeDbfs(dbfs)));
   return 92 - ((clamped + 80) / 70) * 84;
 }
 
@@ -352,6 +377,7 @@ export function App() {
   const [answerEntries, setAnswerEntries] = useState<AnswerEntry[]>([]);
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [isAudioDebugOpen, setIsAudioDebugOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [webRtcStats, setWebRtcStats] = useState<WebRtcStatsSnapshot>(EMPTY_WEBRTC_STATS);
   const [volumeQuality, setVolumeQuality] = useState<VolumeQuality>("silent");
   const [volumeDbfs, setVolumeDbfs] = useState(-100);
@@ -383,6 +409,14 @@ export function App() {
 
   const appendLine = useCallback((role: ChatLine["role"], text: string) => {
     setChatLines((current) => [makeLine(role, text), ...current].slice(0, 7));
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => undefined);
+      return;
+    }
+    document.documentElement.requestFullscreen().catch(() => undefined);
   }, []);
 
   const sendUtteranceFilterConfig = useCallback((rmsDbfs: number, peakDbfsValue: number) => {
@@ -1021,7 +1055,20 @@ export function App() {
       liveTalkingRef.current?.disconnect();
       stopMicrophone();
     };
-  }, [connectBackend, connectLiveTalking, stopMicrophone]);
+  }, []);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    handleFullscreenChange();
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, []);
 
   useEffect(() => {
     const answerList = answerListRef.current;
@@ -1298,6 +1345,9 @@ export function App() {
         </div>
 
         <div className="floating-actions">
+          <button title={isFullscreen ? "退出全屏" : "进入全屏"} onClick={toggleFullscreen}>
+            {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+          </button>
           <button title="键盘输入" onClick={() => setIsInputOpen((current) => !current)}>
             <Keyboard size={18} />
           </button>

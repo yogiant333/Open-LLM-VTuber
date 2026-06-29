@@ -40,7 +40,6 @@ class KWSConfig(I18nMixin):
     frame_ms: int = Field(40, alias="frame_ms")
     pre_roll_ms: int = Field(600, alias="pre_roll_ms")
     cooldown_seconds: float = Field(2.0, alias="cooldown_seconds")
-    listen_timeout_seconds: float = Field(10.0, alias="listen_timeout_seconds")
     active_timeout_seconds: float = Field(10.0, alias="active_timeout_seconds")
     sherpa_onnx_kws: SherpaOnnxKWSConfig = Field(
         default_factory=SherpaOnnxKWSConfig,

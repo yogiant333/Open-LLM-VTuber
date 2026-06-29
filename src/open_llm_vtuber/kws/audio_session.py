@@ -149,16 +149,11 @@ class AudioSession:
                 events.append(AudioSessionEvent(type="utterance", audio=audio))
 
         if self._user_speech_active:
-            # 10 秒窗口只限制“是否开始讲话”。用户已经开始说长句时不能因为句子超过 10 秒而失效。
+            # 超时窗口只限制“是否开始讲话”。用户已经开始说长句时不能因为句子超过窗口而失效。
             self._last_user_activity_at = now
             return events
 
-        active_timeout = getattr(
-            self.config,
-            "active_timeout_seconds",
-            self.config.listen_timeout_seconds,
-        )
-        if now - self._last_user_activity_at > active_timeout:
+        if now - self._last_user_activity_at > self.config.active_timeout_seconds:
             logger.info("KWS active listening timed out: client_uid={}", self.client_uid)
             self.mark_idle()
             events.append(AudioSessionEvent(type="timeout"))

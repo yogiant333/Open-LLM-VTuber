@@ -2,6 +2,11 @@ import os
 import re
 import sys
 import asyncio
+import base64
+import json
+import subprocess
+import time
+from datetime import datetime
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -12,7 +17,10 @@ from loguru import logger
 from .asr_interface import ASRInterface
 
 
-class VoiceRecognition(ASRInterface):
+PCM_FLOAT32_SAMPLE_RATE = 16000
+
+
+class _InProcessVoiceRecognition(ASRInterface):
     def __init__(
         self,
         working_dir: str = "Qwen3-ASR-GGUF",
@@ -229,3 +237,200 @@ class VoiceRecognition(ASRInterface):
         hotword_chars = sum(len(word) for word in hits)
         coverage = hotword_chars / max(len(normalized_text), 1)
         return coverage >= 0.75
+
+
+class VoiceRecognition(ASRInterface):
+    """Crash-isolated Qwen3-ASR-GGUF adapter.
+
+    The GGUF runtime can abort the whole process on native ggml assertions. Keep it
+    in a worker process so a bad utterance cannot take down the backend server.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+        self.worker: subprocess.Popen | None = None
+        self._worker_stderr_file = None
+        self._worker_stderr_path: Path | None = None
+        self._transcribe_lock = asyncio.Lock()
+        self._request_id = 0
+        self._restart_count = 0
+
+        self._start_worker()
+
+    def transcribe_np(self, audio: np.ndarray) -> str:
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+        audio = np.ascontiguousarray(np.clip(audio, -1, 1), dtype=np.float32)
+        if audio.size == 0:
+            return ""
+        return self._transcribe_via_worker(audio)
+
+    async def async_transcribe_np(self, audio: np.ndarray) -> str:
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+        audio = np.ascontiguousarray(np.clip(audio, -1, 1), dtype=np.float32)
+
+        async with self._transcribe_lock:
+            return await asyncio.to_thread(self.transcribe_np, audio)
+
+    def shutdown(self) -> None:
+        self._stop_worker()
+
+    def _start_worker(self) -> None:
+        self._stop_worker()
+
+        command = [
+            sys.executable,
+            "-m",
+            "src.open_llm_vtuber.asr.qwen3_asr_gguf_worker",
+        ]
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        log_dir = Path("logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        self._worker_stderr_path = (
+            log_dir / f"qwen3-asr-gguf-worker-{datetime.now():%Y%m%d-%H%M%S}.err.log"
+        )
+        self._worker_stderr_file = self._worker_stderr_path.open(
+            "a", encoding="utf-8", errors="replace"
+        )
+        self.worker = subprocess.Popen(
+            command,
+            cwd=str(Path.cwd()),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=self._worker_stderr_file,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            env=env,
+            creationflags=creationflags,
+        )
+        self._send_worker_message({"type": "init", "config": self.kwargs})
+        response = self._read_worker_response()
+        if response.get("ok") is not True:
+            detail = response.get("error") or "unknown worker init failure"
+            self._stop_worker()
+            raise RuntimeError(f"Qwen3-ASR-GGUF worker failed to initialize: {detail}")
+        logger.info("Qwen3-ASR-GGUF worker started: pid={}", self.worker.pid)
+
+    def _stop_worker(self) -> None:
+        worker = self.worker
+        self.worker = None
+        if not worker:
+            return
+        try:
+            if worker.poll() is None and worker.stdin:
+                try:
+                    self._send_worker_message({"type": "shutdown"}, worker=worker)
+                except Exception:
+                    pass
+                try:
+                    worker.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    worker.kill()
+        finally:
+            for pipe in (worker.stdin, worker.stdout, worker.stderr):
+                try:
+                    if pipe:
+                        pipe.close()
+                except Exception:
+                    pass
+            if self._worker_stderr_file:
+                try:
+                    self._worker_stderr_file.close()
+                except Exception:
+                    pass
+                self._worker_stderr_file = None
+
+    def _transcribe_via_worker(self, audio: np.ndarray) -> str:
+        self._request_id += 1
+        request_id = self._request_id
+        payload = base64.b64encode(audio.tobytes()).decode("ascii")
+        message = {
+            "type": "transcribe",
+            "id": request_id,
+            "sample_rate": PCM_FLOAT32_SAMPLE_RATE,
+            "dtype": "float32",
+            "shape": [int(audio.size)],
+            "audio": payload,
+        }
+
+        try:
+            self._send_worker_message(message)
+            response = self._read_worker_response()
+        except Exception as exc:
+            stderr_tail = self._worker_stderr_tail()
+            logger.error(
+                "Qwen3-ASR-GGUF worker crashed during transcription; "
+                "dropping current utterance and restarting worker. error={} stderr_tail={}",
+                exc,
+                stderr_tail,
+            )
+            self._restart_worker_after_crash()
+            return ""
+
+        if response.get("id") != request_id:
+            logger.error(
+                "Qwen3-ASR-GGUF worker returned mismatched response id: expected={} got={}",
+                request_id,
+                response.get("id"),
+            )
+            self._restart_worker_after_crash()
+            return ""
+
+        if response.get("ok") is not True:
+            logger.error(
+                "Qwen3-ASR-GGUF worker transcription failed: {}",
+                response.get("error") or "unknown error",
+            )
+            return ""
+        return str(response.get("text") or "").strip()
+
+    def _restart_worker_after_crash(self) -> None:
+        self._restart_count += 1
+        time.sleep(min(1.0, 0.1 * self._restart_count))
+        self._start_worker()
+
+    def _send_worker_message(
+        self, message: dict, worker: subprocess.Popen | None = None
+    ) -> None:
+        target = worker or self.worker
+        if not target or target.poll() is not None or not target.stdin:
+            raise RuntimeError("Qwen3-ASR-GGUF worker is not running")
+        target.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
+        target.stdin.flush()
+
+    def _read_worker_response(self) -> dict:
+        worker = self.worker
+        if not worker or not worker.stdout:
+            raise RuntimeError("Qwen3-ASR-GGUF worker stdout is unavailable")
+        while True:
+            line = worker.stdout.readline()
+            if not line:
+                code = worker.poll()
+                raise RuntimeError(
+                    f"Qwen3-ASR-GGUF worker exited unexpectedly: code={code}"
+                )
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Ignoring non-JSON stdout from Qwen3-ASR-GGUF worker: {}",
+                    line.strip()[:300],
+                )
+
+    def _worker_stderr_tail(self, max_chars: int = 2000) -> str:
+        worker = self.worker
+        if not worker or not self._worker_stderr_path or not self._worker_stderr_path.exists():
+            return ""
+        try:
+            with self._worker_stderr_path.open("r", encoding="utf-8", errors="replace") as file:
+                file.seek(0, os.SEEK_END)
+                size = file.tell()
+                file.seek(max(0, size - max_chars))
+                return file.read()[-max_chars:]
+        except Exception:
+            return ""

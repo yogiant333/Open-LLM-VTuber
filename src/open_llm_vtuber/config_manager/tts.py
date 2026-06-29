@@ -754,11 +754,18 @@ class CartesiaTTSConfig(I18nMixin):
     }
 
 
+class Pyttsx3TTSConfig(I18nMixin):
+    """Configuration for pyttsx3/SAPI TTS."""
+
+    DESCRIPTIONS: ClassVar[Dict[str, Description]] = {}
+
+
 class TTSConfig(I18nMixin):
     """Configuration for Text-to-Speech."""
 
     tts_model: Literal[
         "azure_tts",
+        "pyttsx3_tts",
         "bark_tts",
         "edge_tts",
         "cosyvoice_tts",
@@ -781,6 +788,9 @@ class TTSConfig(I18nMixin):
     ] = Field(..., alias="tts_model")
 
     azure_tts: Optional[AzureTTSConfig] = Field(None, alias="azure_tts")
+    pyttsx3_tts: Pyttsx3TTSConfig = Field(
+        default_factory=Pyttsx3TTSConfig, alias="pyttsx3_tts"
+    )
     bark_tts: Optional[BarkTTSConfig] = Field(None, alias="bark_tts")
     edge_tts: Optional[EdgeTTSConfig] = Field(None, alias="edge_tts")
     cosyvoice_tts: Optional[CosyvoiceTTSConfig] = Field(None, alias="cosyvoice_tts")
@@ -810,6 +820,9 @@ class TTSConfig(I18nMixin):
             en="Text-to-speech model to use", zh="要使用的文本转语音模型"
         ),
         "azure_tts": Description(en="Configuration for Azure TTS", zh="Azure TTS 配置"),
+        "pyttsx3_tts": Description(
+            en="Configuration for pyttsx3/SAPI TTS", zh="pyttsx3/SAPI TTS 配置"
+        ),
         "bark_tts": Description(en="Configuration for Bark TTS", zh="Bark TTS 配置"),
         "edge_tts": Description(en="Configuration for Edge TTS", zh="Edge TTS 配置"),
         "cosyvoice_tts": Description(
@@ -864,6 +877,8 @@ class TTSConfig(I18nMixin):
         # Only validate the selected TTS model
         if tts_model == "azure_tts" and values.azure_tts is not None:
             values.azure_tts.model_validate(values.azure_tts.model_dump())
+        elif tts_model == "pyttsx3_tts" and values.pyttsx3_tts is not None:
+            values.pyttsx3_tts.model_validate(values.pyttsx3_tts.model_dump())
         elif tts_model == "bark_tts" and values.bark_tts is not None:
             values.bark_tts.model_validate(values.bark_tts.model_dump())
         elif tts_model == "edge_tts" and values.edge_tts is not None:
