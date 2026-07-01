@@ -10,8 +10,10 @@ if not exist "%PS_SCRIPT%" (
     exit /b 1
 )
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%" %*
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
+set "RC=%ERRORLEVEL%"
 
 echo.
-echo Script exited with code %ERRORLEVEL%.
+echo Script exited with code %RC%.
 pause
+exit /b %RC%
